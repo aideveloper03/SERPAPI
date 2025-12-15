@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+*.egg-info/
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Configuration (sensitive)
+config/proxies.txt
+config/socks_proxies.txt
+
+# Keep example files
+!config/proxies.txt.example
+!config/socks_proxies.txt.example
+
+# SSL certificates
+ssl/
+*.pem
+*.key
+*.crt
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker/
+
+# Playwright browsers
+/ms-playwright/
+
+# Redis dumps
+dump.rdb
+appendonly.aof
