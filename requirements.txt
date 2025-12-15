@@ -1,0 +1,61 @@
+# Core Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Async HTTP Clients
+aiohttp==3.9.1
+httpx==0.26.0
+requests==2.31.0
+
+# Web Scraping
+beautifulsoup4==4.12.3
+lxml==5.1.0
+selenium==4.16.0
+playwright==1.41.0
+pyppeteer==2.0.0
+
+# HTML Parsing & Content Extraction
+html5lib==1.1
+cssselect==1.2.0
+extruct==0.16.0
+w3lib==2.1.2
+
+# Proxy & IP Management
+aiohttp-socks==0.8.4
+python-socks==2.4.3
+fake-useragent==1.4.0
+user-agents==2.2.0
+
+# Captcha Solving
+opencv-python==4.9.0.80
+numpy==1.26.3
+pillow==10.2.0
+pytesseract==0.3.10
+
+# Rate Limiting & Caching
+redis==5.0.1
+aioredis==2.0.1
+limits==3.7.0
+
+# Data Processing
+pandas==2.2.0
+phonenumbers==8.13.27
+email-validator==2.1.0
+tldextract==5.1.1
+
+# Concurrency & Performance
+asyncio==3.4.3
+aiodns==3.1.1
+aiofiles==23.2.1
+uvloop==0.19.0
+
+# Configuration
+pyyaml==6.0.1
+python-dotenv==1.0.0
+
+# Utilities
+tenacity==8.2.3
+loguru==0.7.2
+python-json-logger==2.0.7
