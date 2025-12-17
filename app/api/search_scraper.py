@@ -30,6 +30,10 @@ class SearchRequest(BaseModel):
         default="en",
         description="Language code (e.g., en, es, fr)"
     )
+    use_alternative: bool = Field(
+        default=False,
+        description="Force use of alternative googlesearch-python library"
+    )
 
 
 class BatchSearchRequest(BaseModel):
@@ -60,9 +64,14 @@ class SearchResponse(BaseModel):
 @router.post("/google", response_model=SearchResponse)
 async def google_search(request: SearchRequest):
     """
-    Scrape Google search results
+    Scrape Google search results with multiple fallback strategies
     
     Supports search types: all, news, images, videos
+    
+    Strategies:
+    1. Standard scraping with aiohttp
+    2. Browser automation (Playwright/Selenium)
+    3. Alternative googlesearch-python library (use_alternative=true)
     
     Example:
     ```json
@@ -70,7 +79,8 @@ async def google_search(request: SearchRequest):
         "query": "python web scraping",
         "search_type": "all",
         "num_results": 10,
-        "language": "en"
+        "language": "en",
+        "use_alternative": false
     }
     ```
     """
@@ -82,7 +92,8 @@ async def google_search(request: SearchRequest):
             query=request.query,
             search_type=request.search_type,
             num_results=request.num_results,
-            language=request.language
+            language=request.language,
+            use_alternative=request.use_alternative
         )
         
         return SearchResponse(**result)
