@@ -6,6 +6,8 @@ pydantic-settings==2.1.0
 
 # Async HTTP Clients
 aiohttp==3.9.1
+brotli==1.1.0
+brotlipy==0.7.0
 httpx==0.26.0
 requests==2.31.0
 
@@ -59,3 +61,7 @@ python-dotenv==1.0.0
 tenacity==8.2.3
 loguru==0.7.2
 python-json-logger==2.0.7
+
+# Alternative Search Libraries
+googlesearch-python==1.2.4
+duckduckgo-search==4.1.1
