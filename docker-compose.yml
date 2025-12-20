@@ -9,7 +9,7 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -19,7 +19,7 @@ services:
       - scraper-network
     restart: unless-stopped
 
-  # Web Scraping API
+  # Main Search Scraping API
   api:
     build:
       context: .
@@ -32,37 +32,45 @@ services:
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - API_WORKERS=4
-      - DEBUG=False
+      - DEBUG=false
       
-      # Rate Limiting
-      - MAX_SEARCH_REQUESTS_PER_MINUTE=60
-      - MAX_WEBSITE_REQUESTS_PER_MINUTE=30
-      - MAX_CONCURRENT_REQUESTS=50
+      # Rate Limiting (50+ requests per minute)
+      - MAX_SEARCH_REQUESTS_PER_MINUTE=100
+      - MAX_WEBSITE_REQUESTS_PER_MINUTE=60
+      - MAX_CONCURRENT_REQUESTS=100
       
-      # Redis Configuration
+      # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
-      - REDIS_PASSWORD=
       
       # Proxy Configuration
-      - USE_PROXY=True
-      - PROXY_ROTATION=True
-      - PROXY_TIMEOUT=30
+      - USE_PROXY=true
+      - PROXY_ROTATION=true
+      - PROXY_TIMEOUT=15
+      - AUTO_FETCH_PROXIES=true
       
-      # Captcha Solving
-      - ENABLE_CAPTCHA_SOLVER=True
-      - CAPTCHA_TIMEOUT=60
+      # Request Configuration (fast)
+      - REQUEST_TIMEOUT=15
+      - MAX_RETRIES=2
+      - RETRY_DELAY=0.5
       
-      # Request Configuration
-      - REQUEST_TIMEOUT=30
-      - MAX_RETRIES=3
-      - RETRY_DELAY=2
+      # Search Configuration
+      - DEFAULT_SEARCH_ENGINE=google
+      - ENABLE_FALLBACK=true
+      - CACHE_RESULTS=true
+      - CACHE_TTL=300
       
-      # Scraping Configuration
-      - JAVASCRIPT_RENDERING=True
-      - BROWSER_HEADLESS=True
-      - PAGE_LOAD_TIMEOUT=30
+      # Captcha Solving (optional - add your API keys)
+      - ENABLE_CAPTCHA_SOLVER=true
+      - TWOCAPTCHA_API_KEY=${TWOCAPTCHA_API_KEY:-}
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY:-}
+      - CAPMONSTER_API_KEY=${CAPMONSTER_API_KEY:-}
+      
+      # Scraping
+      - JAVASCRIPT_RENDERING=true
+      - BROWSER_HEADLESS=true
+      - PAGE_LOAD_TIMEOUT=15
       
       # Logging
       - LOG_LEVEL=INFO
@@ -71,7 +79,6 @@ services:
     volumes:
       - ./config:/app/config
       - ./logs:/app/logs
-      - ./app:/app/app  # For development hot-reload
     
     depends_on:
       redis:
@@ -82,7 +89,7 @@ services:
     
     restart: unless-stopped
     
-    # Resource limits
+    # Resource limits for high performance
     deploy:
       resources:
         limits:
@@ -92,7 +99,32 @@ services:
           cpus: '2'
           memory: 2G
 
-  # Nginx reverse proxy (optional)
+  # Development version with hot reload
+  api-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scraper-api-dev
+    ports:
+      - "8001:8000"
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - USE_PROXY=false
+      - REDIS_HOST=redis
+    volumes:
+      - ./app:/app/app
+      - ./config:/app/config
+      - ./logs:/app/logs
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    depends_on:
+      - redis
+    networks:
+      - scraper-network
+    profiles:
+      - dev
+
+  # Nginx reverse proxy (production)
   nginx:
     image: nginx:alpine
     container_name: scraper-nginx

@@ -1,20 +1,30 @@
 """
 Search Scraper API Endpoints
-Provides endpoints for Google and DuckDuckGo search scraping
+High-performance search across Google, DuckDuckGo, Bing, Yahoo with automatic fallback
 """
+import asyncio
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from loguru import logger
 
-from app.scrapers import GoogleScraper, DuckDuckGoScraper
+from app.scrapers import (
+    GoogleScraper, 
+    DuckDuckGoScraper, 
+    BingScraper, 
+    YahooScraper,
+    unified_search,
+    SearchEngine
+)
 
 
 router = APIRouter(prefix="/api/v1/search", tags=["Search Scraper"])
 
 
+# Request Models
+
 class SearchRequest(BaseModel):
-    """Search request model"""
+    """Standard search request"""
     query: str = Field(..., description="Search query", min_length=1, max_length=500)
     search_type: str = Field(
         default="all",
@@ -30,159 +40,362 @@ class SearchRequest(BaseModel):
         default="en",
         description="Language code (e.g., en, es, fr)"
     )
-    use_alternative: bool = Field(
+
+
+class UnifiedSearchRequest(BaseModel):
+    """Unified search request with fallback options"""
+    query: str = Field(..., description="Search query", min_length=1, max_length=500)
+    search_type: str = Field(default="all")
+    num_results: int = Field(default=10, ge=1, le=100)
+    language: str = Field(default="en")
+    preferred_engine: Optional[str] = Field(
+        default="google",
+        description="Preferred search engine: google, duckduckgo, bing, yahoo"
+    )
+    use_fallback: bool = Field(
+        default=True,
+        description="Automatically fallback to other engines on failure"
+    )
+    parallel_search: bool = Field(
         default=False,
-        description="Force use of alternative googlesearch-python library"
+        description="Search all engines in parallel and merge results"
+    )
+    use_cache: bool = Field(
+        default=True,
+        description="Use cached results when available"
     )
 
 
 class BatchSearchRequest(BaseModel):
-    """Batch search request model"""
+    """Batch search request"""
     queries: List[str] = Field(
         ...,
         description="List of search queries",
-        min_items=1,
-        max_items=50
+        min_length=1,
+        max_length=50
     )
     search_type: str = Field(default="all")
     num_results: int = Field(default=10, ge=1, le=100)
     language: str = Field(default="en")
+    preferred_engine: str = Field(default="google")
+    use_fallback: bool = Field(default=True)
 
+
+class FastSearchRequest(BaseModel):
+    """Fast search request (optimized for speed)"""
+    query: str = Field(..., description="Search query")
+    num_results: int = Field(default=10, ge=1, le=50)
+
+
+# Response Models
 
 class SearchResponse(BaseModel):
-    """Search response model"""
+    """Standard search response"""
     success: bool
     query: str
     search_type: str
     total_results: int
     results: List[dict]
+    engine: Optional[str] = None
+    response_time: Optional[float] = None
+    fallback_used: Optional[bool] = None
     error: Optional[str] = None
 
 
-# Google Search Endpoints
+# ============================================================================
+# UNIFIED SEARCH ENDPOINTS (Recommended)
+# ============================================================================
 
-@router.post("/google", response_model=SearchResponse)
-async def google_search(request: SearchRequest):
+@router.post("/unified", response_model=SearchResponse)
+async def unified_search_endpoint(request: UnifiedSearchRequest):
     """
-    Scrape Google search results with multiple fallback strategies
+    🚀 **Recommended** - Unified search with automatic fallback
     
-    Supports search types: all, news, images, videos
+    Searches using preferred engine, falls back to alternatives on failure.
+    This is the most reliable way to get search results.
     
-    Strategies:
-    1. Standard scraping with aiohttp
-    2. Browser automation (Playwright/Selenium)
-    3. Alternative googlesearch-python library (use_alternative=true)
+    **Engines:** Google → DuckDuckGo → Bing → Yahoo
+    
+    **Features:**
+    - Automatic fallback on failure
+    - Result caching for speed
+    - Parallel search option
+    - Smart engine selection based on performance
     
     Example:
     ```json
     {
         "query": "python web scraping",
-        "search_type": "all",
-        "num_results": 10,
-        "language": "en",
-        "use_alternative": false
+        "preferred_engine": "google",
+        "use_fallback": true,
+        "num_results": 10
     }
     ```
     """
     try:
-        logger.info(f"Google search request: {request.query} ({request.search_type})")
+        logger.info(f"Unified search: {request.query} (engine: {request.preferred_engine})")
         
-        scraper = GoogleScraper()
-        result = await scraper.search(
+        # Map string to enum
+        engine_map = {
+            'google': SearchEngine.GOOGLE,
+            'duckduckgo': SearchEngine.DUCKDUCKGO,
+            'bing': SearchEngine.BING,
+            'yahoo': SearchEngine.YAHOO
+        }
+        preferred = engine_map.get(request.preferred_engine, SearchEngine.GOOGLE)
+        
+        result = await unified_search.search(
             query=request.query,
             search_type=request.search_type,
             num_results=request.num_results,
             language=request.language,
-            use_alternative=request.use_alternative
+            preferred_engine=preferred,
+            use_fallback=request.use_fallback,
+            use_cache=request.use_cache,
+            parallel_search=request.parallel_search
         )
         
-        return SearchResponse(**result)
+        return SearchResponse(
+            success=result.success,
+            query=result.query,
+            search_type=result.search_type,
+            total_results=result.total_results,
+            results=result.results,
+            engine=result.engine,
+            response_time=result.response_time,
+            fallback_used=result.fallback_used,
+            error=result.error
+        )
         
     except Exception as e:
-        logger.error(f"Google search error: {str(e)}")
+        logger.error(f"Unified search error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/google/batch")
-async def google_search_batch(request: BatchSearchRequest):
+@router.post("/fast", response_model=SearchResponse)
+async def fast_search_endpoint(request: FastSearchRequest):
     """
-    Batch Google search - scrape multiple queries concurrently
+    ⚡ **Fastest** - Speed-optimized search
+    
+    Uses the fastest available method (typically DuckDuckGo API).
+    Falls back to other engines if needed.
+    
+    **Best for:** Quick searches where speed matters more than comprehensiveness
     
     Example:
     ```json
     {
-        "queries": ["python", "javascript", "java"],
+        "query": "python tutorial",
+        "num_results": 10
+    }
+    ```
+    """
+    try:
+        logger.info(f"Fast search: {request.query}")
+        
+        result = await unified_search.fast_search(
+            query=request.query,
+            num_results=request.num_results
+        )
+        
+        return SearchResponse(
+            success=result.success,
+            query=result.query,
+            search_type=result.search_type,
+            total_results=result.total_results,
+            results=result.results,
+            engine=result.engine,
+            response_time=result.response_time,
+            fallback_used=result.fallback_used,
+            error=result.error
+        )
+        
+    except Exception as e:
+        logger.error(f"Fast search error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/parallel", response_model=SearchResponse)
+async def parallel_search_endpoint(request: SearchRequest):
+    """
+    🔄 **Most Comprehensive** - Search all engines in parallel
+    
+    Searches Google, DuckDuckGo, Bing, and Yahoo simultaneously.
+    Merges and deduplicates results for comprehensive coverage.
+    
+    **Best for:** Research, comprehensive result gathering
+    
+    Example:
+    ```json
+    {
+        "query": "machine learning frameworks",
+        "num_results": 20
+    }
+    ```
+    """
+    try:
+        logger.info(f"Parallel search: {request.query}")
+        
+        result = await unified_search.search(
+            query=request.query,
+            search_type=request.search_type,
+            num_results=request.num_results,
+            language=request.language,
+            parallel_search=True
+        )
+        
+        return SearchResponse(
+            success=result.success,
+            query=result.query,
+            search_type=result.search_type,
+            total_results=result.total_results,
+            results=result.results,
+            engine=result.engine,
+            response_time=result.response_time,
+            error=result.error
+        )
+        
+    except Exception as e:
+        logger.error(f"Parallel search error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# BATCH SEARCH ENDPOINTS
+# ============================================================================
+
+@router.post("/batch")
+async def batch_search_endpoint(request: BatchSearchRequest):
+    """
+    📦 **Batch Search** - Search multiple queries concurrently
+    
+    Processes up to 50 queries in parallel with automatic fallback.
+    
+    Example:
+    ```json
+    {
+        "queries": ["python", "javascript", "rust"],
+        "num_results": 10,
+        "preferred_engine": "google"
+    }
+    ```
+    """
+    try:
+        logger.info(f"Batch search: {len(request.queries)} queries")
+        
+        engine_map = {
+            'google': SearchEngine.GOOGLE,
+            'duckduckgo': SearchEngine.DUCKDUCKGO,
+            'bing': SearchEngine.BING,
+            'yahoo': SearchEngine.YAHOO
+        }
+        preferred = engine_map.get(request.preferred_engine, SearchEngine.GOOGLE)
+        
+        # Create tasks for all queries
+        tasks = [
+            unified_search.search(
+                query=query,
+                search_type=request.search_type,
+                num_results=request.num_results,
+                language=request.language,
+                preferred_engine=preferred,
+                use_fallback=request.use_fallback
+            )
+            for query in request.queries
+        ]
+        
+        # Execute concurrently
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        processed_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                processed_results.append({
+                    "success": False,
+                    "query": request.queries[i],
+                    "error": str(result),
+                    "results": []
+                })
+            else:
+                processed_results.append({
+                    "success": result.success,
+                    "query": result.query,
+                    "engine": result.engine,
+                    "response_time": result.response_time,
+                    "total_results": result.total_results,
+                    "results": result.results
+                })
+        
+        return {
+            "success": True,
+            "total_queries": len(request.queries),
+            "results": processed_results
+        }
+        
+    except Exception as e:
+        logger.error(f"Batch search error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# INDIVIDUAL ENGINE ENDPOINTS
+# ============================================================================
+
+@router.post("/google", response_model=SearchResponse)
+async def google_search_endpoint(request: SearchRequest):
+    """
+    🔍 **Google Search** with automatic fallback
+    
+    Primary: Google scraping with multiple strategies
+    Fallback: DuckDuckGo → Bing → Yahoo
+    
+    Example:
+    ```json
+    {
+        "query": "python web scraping",
         "search_type": "all",
         "num_results": 10
     }
     ```
     """
     try:
-        import asyncio
+        logger.info(f"Google search: {request.query} ({request.search_type})")
         
-        logger.info(f"Batch Google search: {len(request.queries)} queries")
+        result = await unified_search.search_google_with_fallback(
+            query=request.query,
+            search_type=request.search_type,
+            num_results=request.num_results,
+            language=request.language
+        )
         
-        scraper = GoogleScraper()
-        
-        # Create tasks for all queries
-        tasks = [
-            scraper.search(
-                query=query,
-                search_type=request.search_type,
-                num_results=request.num_results,
-                language=request.language
-            )
-            for query in request.queries
-        ]
-        
-        # Execute concurrently
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Process results
-        processed_results = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                processed_results.append({
-                    "success": False,
-                    "query": request.queries[i],
-                    "error": str(result),
-                    "results": []
-                })
-            else:
-                processed_results.append(result)
-        
-        return {
-            "success": True,
-            "total_queries": len(request.queries),
-            "results": processed_results
-        }
+        return SearchResponse(
+            success=result.success,
+            query=result.query,
+            search_type=result.search_type,
+            total_results=result.total_results,
+            results=result.results,
+            engine=result.engine,
+            response_time=result.response_time,
+            fallback_used=result.fallback_used,
+            error=result.error
+        )
         
     except Exception as e:
-        logger.error(f"Batch Google search error: {str(e)}")
+        logger.error(f"Google search error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# DuckDuckGo Search Endpoints
-
 @router.post("/duckduckgo", response_model=SearchResponse)
-async def duckduckgo_search(request: SearchRequest):
+async def duckduckgo_search_endpoint(request: SearchRequest):
     """
-    Scrape DuckDuckGo search results
+    🦆 **DuckDuckGo Search**
     
-    Supports search types: all, news, images, videos
-    
-    Example:
-    ```json
-    {
-        "query": "python web scraping",
-        "search_type": "all",
-        "num_results": 10,
-        "language": "en"
-    }
-    ```
+    Fast API-based search with HTML fallback.
+    Best for privacy-focused searching.
     """
     try:
-        logger.info(f"DuckDuckGo search request: {request.query} ({request.search_type})")
+        logger.info(f"DuckDuckGo search: {request.query}")
         
         scraper = DuckDuckGoScraper()
         result = await scraper.search(
@@ -192,118 +405,124 @@ async def duckduckgo_search(request: SearchRequest):
             region=f"us-{request.language}"
         )
         
-        return SearchResponse(**result)
+        return SearchResponse(
+            success=result.get('success', False),
+            query=request.query,
+            search_type=request.search_type,
+            total_results=result.get('total_results', 0),
+            results=result.get('results', []),
+            engine='duckduckgo',
+            response_time=result.get('response_time'),
+            error=result.get('error')
+        )
         
     except Exception as e:
         logger.error(f"DuckDuckGo search error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/duckduckgo/batch")
-async def duckduckgo_search_batch(request: BatchSearchRequest):
+@router.post("/bing", response_model=SearchResponse)
+async def bing_search_endpoint(request: SearchRequest):
     """
-    Batch DuckDuckGo search - scrape multiple queries concurrently
-    """
-    try:
-        import asyncio
-        
-        logger.info(f"Batch DuckDuckGo search: {len(request.queries)} queries")
-        
-        scraper = DuckDuckGoScraper()
-        
-        # Create tasks for all queries
-        tasks = [
-            scraper.search(
-                query=query,
-                search_type=request.search_type,
-                num_results=request.num_results,
-                region=f"us-{request.language}"
-            )
-            for query in request.queries
-        ]
-        
-        # Execute concurrently
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Process results
-        processed_results = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                processed_results.append({
-                    "success": False,
-                    "query": request.queries[i],
-                    "error": str(result),
-                    "results": []
-                })
-            else:
-                processed_results.append(result)
-        
-        return {
-            "success": True,
-            "total_queries": len(request.queries),
-            "results": processed_results
-        }
-        
-    except Exception as e:
-        logger.error(f"Batch DuckDuckGo search error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Combined Search Endpoint
-
-@router.post("/combined")
-async def combined_search(request: SearchRequest):
-    """
-    Search both Google and DuckDuckGo simultaneously
-    Returns combined results from both search engines
+    🅱️ **Bing Search**
+    
+    Microsoft Bing search scraping.
+    Good alternative when Google is blocked.
     """
     try:
-        import asyncio
+        logger.info(f"Bing search: {request.query}")
         
-        logger.info(f"Combined search request: {request.query}")
-        
-        google_scraper = GoogleScraper()
-        ddg_scraper = DuckDuckGoScraper()
-        
-        # Execute both searches concurrently
-        google_task = google_scraper.search(
+        scraper = BingScraper()
+        result = await scraper.search(
             query=request.query,
             search_type=request.search_type,
             num_results=request.num_results,
             language=request.language
         )
         
-        ddg_task = ddg_scraper.search(
+        return SearchResponse(
+            success=result.get('success', False),
             query=request.query,
             search_type=request.search_type,
-            num_results=request.num_results,
-            region=f"us-{request.language}"
+            total_results=result.get('total_results', 0),
+            results=result.get('results', []),
+            engine='bing',
+            response_time=result.get('response_time'),
+            error=result.get('error')
         )
-        
-        google_result, ddg_result = await asyncio.gather(
-            google_task, ddg_task, return_exceptions=True
-        )
-        
-        return {
-            "success": True,
-            "query": request.query,
-            "search_type": request.search_type,
-            "google": google_result if not isinstance(google_result, Exception) else {"error": str(google_result)},
-            "duckduckgo": ddg_result if not isinstance(ddg_result, Exception) else {"error": str(ddg_result)}
-        }
         
     except Exception as e:
-        logger.error(f"Combined search error: {str(e)}")
+        logger.error(f"Bing search error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Health Check
+@router.post("/yahoo", response_model=SearchResponse)
+async def yahoo_search_endpoint(request: SearchRequest):
+    """
+    🔮 **Yahoo Search**
+    
+    Yahoo search scraping.
+    Additional engine for comprehensive coverage.
+    """
+    try:
+        logger.info(f"Yahoo search: {request.query}")
+        
+        scraper = YahooScraper()
+        result = await scraper.search(
+            query=request.query,
+            search_type=request.search_type,
+            num_results=request.num_results,
+            language=request.language
+        )
+        
+        return SearchResponse(
+            success=result.get('success', False),
+            query=request.query,
+            search_type=request.search_type,
+            total_results=result.get('total_results', 0),
+            results=result.get('results', []),
+            engine='yahoo',
+            response_time=result.get('response_time'),
+            error=result.get('error')
+        )
+        
+    except Exception as e:
+        logger.error(f"Yahoo search error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# UTILITY ENDPOINTS
+# ============================================================================
+
+@router.get("/stats")
+async def search_stats():
+    """Get search engine performance statistics"""
+    stats = unified_search.get_stats()
+    return {
+        "success": True,
+        "engine_stats": stats
+    }
+
+
+@router.post("/cache/clear")
+async def clear_cache():
+    """Clear search result cache"""
+    unified_search.clear_cache()
+    return {"success": True, "message": "Cache cleared"}
+
 
 @router.get("/health")
 async def search_health():
-    """Health check endpoint for search scraper"""
+    """Health check for search service"""
     return {
         "status": "healthy",
         "service": "search_scraper",
-        "engines": ["google", "duckduckgo"]
+        "engines": ["google", "duckduckgo", "bing", "yahoo"],
+        "features": [
+            "automatic_fallback",
+            "parallel_search",
+            "result_caching",
+            "batch_processing"
+        ]
     }

@@ -1,278 +1,113 @@
 #!/usr/bin/env python3
 """
-Installation Verification Script
-Checks if all components are properly installed and configured
+Verify that all components are installed correctly
+Run this before starting the API to check dependencies
 """
+
 import sys
-import os
-from pathlib import Path
-
-# Colors for terminal output
-GREEN = "\033[92m"
-RED = "\033[91m"
-YELLOW = "\033[93m"
-BLUE = "\033[94m"
-RESET = "\033[0m"
+import importlib
 
 
-def print_header(text):
-    """Print section header"""
-    print(f"\n{BLUE}{'=' * 60}{RESET}")
-    print(f"{BLUE}{text}{RESET}")
-    print(f"{BLUE}{'=' * 60}{RESET}\n")
-
-
-def check_pass(message):
-    """Print success message"""
-    print(f"{GREEN}✓{RESET} {message}")
-
-
-def check_fail(message):
-    """Print failure message"""
-    print(f"{RED}✗{RESET} {message}")
-
-
-def check_warn(message):
-    """Print warning message"""
-    print(f"{YELLOW}⚠{RESET} {message}")
-
-
-def check_python_version():
-    """Check Python version"""
-    print_header("Python Version")
-    version = sys.version_info
-    if version >= (3, 9):
-        check_pass(f"Python {version.major}.{version.minor}.{version.micro} (>=3.9 required)")
+def check_import(module_name: str, package_name: str = None, required: bool = True) -> bool:
+    """Check if a module can be imported"""
+    try:
+        importlib.import_module(module_name)
+        print(f"  ✅ {package_name or module_name}")
         return True
-    else:
-        check_fail(f"Python {version.major}.{version.minor}.{version.micro} (>=3.9 required)")
-        return False
-
-
-def check_dependencies():
-    """Check if required packages are installed"""
-    print_header("Python Dependencies")
-    
-    required_packages = [
-        "fastapi",
-        "uvicorn",
-        "aiohttp",
-        "beautifulsoup4",
-        "lxml",
-        "pydantic",
-        "loguru",
-        "requests",
-    ]
-    
-    optional_packages = [
-        ("playwright", "Browser automation for JavaScript sites"),
-        ("selenium", "Alternative browser automation"),
-        ("redis", "Distributed rate limiting"),
-        ("pytesseract", "Captcha solving"),
-    ]
-    
-    all_pass = True
-    
-    # Check required packages
-    for package in required_packages:
-        try:
-            __import__(package)
-            check_pass(f"{package} installed")
-        except ImportError:
-            check_fail(f"{package} NOT installed (required)")
-            all_pass = False
-    
-    print()
-    
-    # Check optional packages
-    for package, description in optional_packages:
-        try:
-            __import__(package)
-            check_pass(f"{package} installed - {description}")
-        except ImportError:
-            check_warn(f"{package} not installed (optional) - {description}")
-    
-    return all_pass
-
-
-def check_file_structure():
-    """Check if required files and directories exist"""
-    print_header("File Structure")
-    
-    base_dir = Path(__file__).parent
-    
-    required_files = [
-        "app/main.py",
-        "app/config/settings.py",
-        "requirements.txt",
-        ".env.example",
-        "config/config.yaml",
-    ]
-    
-    required_dirs = [
-        "app",
-        "app/api",
-        "app/core",
-        "app/scrapers",
-        "app/parsers",
-        "config",
-        "docs",
-    ]
-    
-    all_pass = True
-    
-    # Check files
-    for file_path in required_files:
-        full_path = base_dir / file_path
-        if full_path.exists():
-            check_pass(f"{file_path}")
+    except ImportError as e:
+        if required:
+            print(f"  ❌ {package_name or module_name} - REQUIRED")
         else:
-            check_fail(f"{file_path} NOT FOUND")
-            all_pass = False
-    
-    print()
-    
-    # Check directories
-    for dir_path in required_dirs:
-        full_path = base_dir / dir_path
-        if full_path.is_dir():
-            check_pass(f"{dir_path}/")
-        else:
-            check_fail(f"{dir_path}/ NOT FOUND")
-            all_pass = False
-    
-    return all_pass
-
-
-def check_configuration():
-    """Check configuration files"""
-    print_header("Configuration")
-    
-    base_dir = Path(__file__).parent
-    all_pass = True
-    
-    # Check .env file
-    env_file = base_dir / ".env"
-    if env_file.exists():
-        check_pass(".env file exists")
-    else:
-        check_warn(".env file not found (will use defaults)")
-        print("         Run: cp .env.example .env")
-    
-    # Check config.yaml
-    config_file = base_dir / "config" / "config.yaml"
-    if config_file.exists():
-        try:
-            import yaml
-            with open(config_file) as f:
-                yaml.safe_load(f)
-            check_pass("config.yaml is valid YAML")
-        except Exception as e:
-            check_fail(f"config.yaml has errors: {e}")
-            all_pass = False
-    else:
-        check_fail("config.yaml not found")
-        all_pass = False
-    
-    # Check logs directory
-    logs_dir = base_dir / "logs"
-    if not logs_dir.exists():
-        logs_dir.mkdir(exist_ok=True)
-        check_pass("Created logs/ directory")
-    else:
-        check_pass("logs/ directory exists")
-    
-    return all_pass
-
-
-def check_optional_services():
-    """Check optional external services"""
-    print_header("Optional Services")
-    
-    # Check Redis
-    try:
-        import redis
-        client = redis.Redis(host='localhost', port=6379, socket_connect_timeout=1)
-        client.ping()
-        check_pass("Redis is running (recommended for production)")
-    except:
-        check_warn("Redis not available (optional - will use in-memory rate limiting)")
-    
-    # Check Playwright browsers
-    try:
-        from playwright.sync_api import sync_playwright
-        check_pass("Playwright is installed")
-        print("         Run 'playwright install chromium' to install browsers")
-    except ImportError:
-        check_warn("Playwright not installed (optional for JavaScript sites)")
-    
-    # Check Tesseract
-    try:
-        import pytesseract
-        pytesseract.get_tesseract_version()
-        check_pass("Tesseract OCR is installed (for captcha solving)")
-    except:
-        check_warn("Tesseract not available (optional for captcha solving)")
-
-
-def check_imports():
-    """Check if app can be imported"""
-    print_header("Application Import")
-    
-    try:
-        sys.path.insert(0, str(Path(__file__).parent))
-        from app.config import settings
-        check_pass("app.config.settings imports successfully")
-        
-        from app.main import app
-        check_pass("app.main.app imports successfully")
-        
-        return True
-    except Exception as e:
-        check_fail(f"Import error: {e}")
+            print(f"  ⚠️  {package_name or module_name} - Optional")
         return False
-
-
-def print_summary(checks_passed):
-    """Print summary"""
-    print_header("Summary")
-    
-    if all(checks_passed):
-        print(f"{GREEN}All checks passed! ✓{RESET}\n")
-        print("Your installation is complete and ready to use.\n")
-        print("Next steps:")
-        print("  1. Configure .env file (if needed)")
-        print("  2. Add proxies to config/proxies.txt (optional)")
-        print("  3. Start the server: python run.py")
-        print("  4. Visit: http://localhost:8000/docs")
-    else:
-        print(f"{YELLOW}Some checks failed or have warnings.{RESET}\n")
-        print("Please review the messages above and fix any issues.")
-        print("\nCommon fixes:")
-        print("  - Install dependencies: pip install -r requirements.txt")
-        print("  - Install Playwright browsers: playwright install chromium")
-        print("  - Copy .env file: cp .env.example .env")
 
 
 def main():
-    """Run all checks"""
-    print(f"\n{BLUE}Web Scraping System - Installation Verification{RESET}")
+    print("\n" + "="*60)
+    print("🔍 Search Engine Scraping System - Dependency Check")
+    print("="*60)
     
-    checks_passed = []
+    errors = []
+    warnings = []
     
-    # Run all checks
-    checks_passed.append(check_python_version())
-    checks_passed.append(check_dependencies())
-    checks_passed.append(check_file_structure())
-    checks_passed.append(check_configuration())
-    check_optional_services()  # Optional, doesn't affect pass/fail
-    checks_passed.append(check_imports())
+    # Core dependencies
+    print("\n📦 Core Dependencies:")
+    if not check_import("fastapi"): errors.append("fastapi")
+    if not check_import("uvicorn"): errors.append("uvicorn")
+    if not check_import("pydantic"): errors.append("pydantic")
+    if not check_import("aiohttp"): errors.append("aiohttp")
+    if not check_import("bs4", "beautifulsoup4"): errors.append("beautifulsoup4")
+    if not check_import("lxml"): errors.append("lxml")
+    if not check_import("loguru"): errors.append("loguru")
     
-    # Print summary
-    print_summary(checks_passed)
+    # HTTP clients
+    print("\n🌐 HTTP Clients:")
+    if not check_import("httpx"): warnings.append("httpx")
+    check_import("curl_cffi", required=False)
     
-    # Exit code
-    sys.exit(0 if all(checks_passed) else 1)
+    # Brotli support (fixes the encoding error)
+    print("\n🔧 Encoding Support:")
+    if not check_import("brotli", "Brotli"): 
+        errors.append("Brotli")
+        print("     ⚠️  This fixes the 'Cannot decode content-encoding: brotli' error!")
+    
+    # Proxy support
+    print("\n🔒 Proxy Support:")
+    check_import("aiohttp_socks", required=False)
+    check_import("python_socks", "python-socks", required=False)
+    
+    # Browser automation
+    print("\n🖥️ Browser Automation:")
+    check_import("playwright", required=False)
+    check_import("selenium", required=False)
+    
+    # Search libraries (fallback)
+    print("\n🔍 Search Libraries (API fallback):")
+    check_import("duckduckgo_search", "duckduckgo-search", required=False)
+    check_import("googlesearch", "googlesearch-python", required=False)
+    
+    # Captcha solving
+    print("\n🔐 Captcha Solving:")
+    check_import("cv2", "opencv-python", required=False)
+    check_import("pytesseract", required=False)
+    check_import("twocaptcha", "twocaptcha-python", required=False)
+    check_import("anticaptchaofficial", "python-anticaptcha", required=False)
+    
+    # Results
+    print("\n" + "="*60)
+    
+    if errors:
+        print(f"❌ Missing required packages: {', '.join(errors)}")
+        print("\nInstall with:")
+        print(f"  pip install {' '.join(errors)}")
+        sys.exit(1)
+    else:
+        print("✅ All required dependencies are installed!")
+        
+    if warnings:
+        print(f"\n⚠️  Optional packages not installed: {', '.join(warnings)}")
+        print("   These are recommended for full functionality.")
+    
+    # Check Playwright browser
+    print("\n🌐 Checking Playwright browser...")
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            try:
+                browser = p.chromium.launch(headless=True)
+                browser.close()
+                print("  ✅ Chromium browser is installed")
+            except Exception as e:
+                print("  ⚠️  Chromium not installed. Run: playwright install chromium")
+    except ImportError:
+        print("  ⚠️  Playwright not installed")
+    except Exception as e:
+        print(f"  ⚠️  Playwright browser check failed: {e}")
+    
+    print("\n" + "="*60)
+    print("✨ Verification complete!")
+    print("   Start the API with: python -m uvicorn app.main:app --reload")
+    print("="*60 + "\n")
 
 
 if __name__ == "__main__":

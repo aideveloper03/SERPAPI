@@ -1,90 +1,37 @@
-# High-Volume Web Scraping System
+# 🔍 High-Performance Search Engine Scraping System
 
-A production-ready, high-volume concurrent web scraping system with search engine and generic website scrapers. Built with Python, FastAPI, and advanced scraping techniques.
+A production-ready, fast, and reliable search engine scraping system supporting **Google, DuckDuckGo, Bing, and Yahoo** with automatic fallback, anti-detection, and proxy rotation.
 
-[![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)](https://fastapi.tiangolo.com/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+## ⚡ Key Features
 
-## 🚀 Features
+- **4 Search Engines**: Google, DuckDuckGo, Bing, Yahoo
+- **Blazing Fast**: Sub-second responses with optimized strategies
+- **Automatic Fallback**: Never miss results - falls back to other engines on failure
+- **8+ Anti-Detection Strategies**: curl_cffi impersonation, TLS fingerprinting, stealth mode
+- **Proxy Rotation**: Auto-fetching from 8+ free proxy sources + custom proxy support
+- **Captcha Solving**: 2Captcha, Anti-Captcha, CapMonster integration
+- **High Throughput**: Handles 50+ requests per minute easily
+- **Docker Ready**: Full Docker and docker-compose support
 
-### Core Capabilities
-
-- **High-Volume Scraping**: 60+ search results/min, 30+ websites/min
-- **Concurrent Processing**: Handle 50+ simultaneous requests
-- **Multiple Fallback Methods**: 2-3 strategies per request for maximum success
-- **Proxy Rotation**: Automatic IP rotation with health checking
-- **Captcha Solving**: Automatic detection and solving (audio, image recognition)
-- **Browser Automation**: Playwright and Selenium for JavaScript-heavy sites
-- **Content Categorization**: Intelligent extraction of paragraphs, contacts, metadata
-- **Rate Limiting**: Built-in token bucket rate limiting with Redis support
-- **RESTful API**: Clean, documented FastAPI endpoints
-
-### Search Engine Scraping
-
-- **Google Search**: All, News, Images, Videos
-- **DuckDuckGo Search**: All, News, Images, Videos
-- **Batch Processing**: Scrape multiple queries concurrently
-- **Combined Search**: Query both engines simultaneously
-
-### Website Scraping
-
-- **Generic Scraping**: Works with any website
-- **Content Extraction**:
-  - Title and metadata
-  - Headings (h1-h6)
-  - Paragraphs with context
-  - Lists and tables
-  - Images and links
-  - Structured data (JSON-LD, Open Graph, microdata)
-  
-- **Contact Extraction**:
-  - Email addresses (validated)
-  - Phone numbers (international formats)
-  - Social media links (Facebook, Twitter, LinkedIn, Instagram, YouTube)
-  - Physical addresses
-  
-- **Advanced Features**:
-  - Deep scraping (follow links)
-  - Batch scraping (multiple URLs)
-  - Quick extract endpoints (contacts, content, metadata only)
-
-## 📋 Table of Contents
-
-- [Quick Start](#-quick-start)
-- [Installation](#-installation)
-- [Configuration](#-configuration)
-- [Usage](#-usage)
-- [API Documentation](#-api-documentation)
-- [Docker Deployment](#-docker-deployment)
-- [Performance](#-performance)
-- [Architecture](#-architecture)
-- [Contributing](#-contributing)
-- [License](#-license)
-
-## ⚡ Quick Start
+## 🚀 Quick Start
 
 ### Using Docker (Recommended)
 
 ```bash
-# Clone repository
-git clone <repository-url>
-cd web-scraping-system
+# Clone the repository
+git clone <repo-url>
+cd search-scraper
 
-# Start services
+# Start with Docker Compose
 docker-compose up -d
 
-# Check status
-curl http://localhost:8000/health
+# API available at http://localhost:8000
+# Swagger docs at http://localhost:8000/docs
 ```
 
-### Manual Setup
+### Local Installation
 
 ```bash
-# Clone repository
-git clone <repository-url>
-cd web-scraping-system
-
 # Create virtual environment
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -92,550 +39,219 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Install Playwright browsers (optional)
+# Install Playwright browser
 playwright install chromium
 
-# Configure
+# Copy environment file
 cp .env.example .env
-# Edit .env with your settings
 
-# Run application
-python app/main.py
+# Start Redis (optional, for caching)
+docker run -d -p 6379:6379 redis:alpine
+
+# Run the API
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### First Request
+## 📚 API Usage
+
+### Recommended: Unified Search (with automatic fallback)
+
+```python
+import requests
+
+response = requests.post("http://localhost:8000/api/v1/search/unified", json={
+    "query": "python web scraping",
+    "preferred_engine": "google",
+    "use_fallback": True,
+    "num_results": 10
+})
+
+results = response.json()
+print(f"Found {results['total_results']} results using {results['engine']}")
+```
+
+### Fast Search (speed optimized)
+
+```python
+response = requests.post("http://localhost:8000/api/v1/search/fast", json={
+    "query": "machine learning",
+    "num_results": 10
+})
+```
+
+### Parallel Search (most comprehensive)
+
+```python
+response = requests.post("http://localhost:8000/api/v1/search/parallel", json={
+    "query": "artificial intelligence",
+    "num_results": 20
+})
+# Searches all 4 engines simultaneously and merges results
+```
+
+### Batch Search (multiple queries)
+
+```python
+response = requests.post("http://localhost:8000/api/v1/search/batch", json={
+    "queries": ["python", "javascript", "rust", "go"],
+    "num_results": 10,
+    "preferred_engine": "google"
+})
+```
+
+## 🛡️ Anti-Detection Strategies
+
+This system implements **8+ anti-detection strategies** to avoid blocking:
+
+| Strategy | Description |
+|----------|-------------|
+| **curl_cffi Impersonation** | Mimics Chrome/Firefox/Safari TLS fingerprints |
+| **TLS Fingerprint** | Real browser TLS signatures |
+| **User-Agent Rotation** | 30+ modern browser UAs (2024) |
+| **Proxy Rotation** | Auto-fetched from 8+ sources |
+| **Header Variation** | Realistic browser headers |
+| **Request Timing** | Human-like delays |
+| **Cookie Persistence** | Session management |
+| **Playwright Stealth** | Full browser automation with stealth |
+
+## 🌐 Proxy Configuration
+
+### Auto-Fetched Proxies (Default)
+
+The system automatically fetches proxies from multiple free sources:
+- ProxyScrape
+- TheSpeedX Proxy List
+- Clarketm Proxy List
+- Monosans Proxy List
+- And more...
+
+### Custom Proxies
+
+Add your proxies to `config/proxies.txt`:
+
+```
+http://user:pass@ip:port
+http://ip:port
+socks5://ip:port
+```
+
+## 🔐 Captcha Solving
+
+Supports automatic captcha solving with paid services:
+
+### 2Captcha
 
 ```bash
-# Search Google
-curl -X POST http://localhost:8000/api/v1/search/google \
-  -H "Content-Type: application/json" \
-  -d '{"query": "python web scraping", "num_results": 5}'
-
-# Scrape website
-curl -X POST http://localhost:8000/api/v1/website/scrape \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com"}'
+export TWOCAPTCHA_API_KEY=your_api_key
 ```
 
-## 📦 Installation
-
-### Prerequisites
-
-- Python 3.9 or higher
-- pip (Python package manager)
-- Redis (optional, for distributed rate limiting)
-- Tesseract OCR (optional, for captcha solving)
-
-### Step-by-Step Installation
-
-1. **Clone the repository**
+### Anti-Captcha
 
 ```bash
-git clone <repository-url>
-cd web-scraping-system
+export ANTICAPTCHA_API_KEY=your_api_key
 ```
 
-2. **Create virtual environment**
+### CapMonster
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or
-venv\Scripts\activate  # Windows
+export CAPMONSTER_API_KEY=your_api_key
 ```
 
-3. **Install Python dependencies**
+## 📊 API Endpoints
 
-```bash
-pip install -r requirements.txt
-```
-
-4. **Install optional components**
-
-```bash
-# Playwright (for JavaScript-heavy sites)
-playwright install chromium
-
-# Redis (Ubuntu/Debian)
-sudo apt-get install redis-server
-
-# Tesseract OCR (Ubuntu/Debian)
-sudo apt-get install tesseract-ocr
-```
-
-5. **Configure the application**
-
-```bash
-cp .env.example .env
-# Edit .env with your settings
-```
-
-6. **Run the application**
-
-```bash
-python app/main.py
-```
-
-See [docs/SETUP.md](docs/SETUP.md) for detailed installation instructions.
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/search/unified` | POST | 🔥 Recommended - Smart search with fallback |
+| `/api/v1/search/fast` | POST | ⚡ Speed-optimized search |
+| `/api/v1/search/parallel` | POST | 🔄 Search all engines simultaneously |
+| `/api/v1/search/batch` | POST | 📦 Batch process multiple queries |
+| `/api/v1/search/google` | POST | 🔍 Google with fallback |
+| `/api/v1/search/duckduckgo` | POST | 🦆 DuckDuckGo search |
+| `/api/v1/search/bing` | POST | 🅱️ Bing search |
+| `/api/v1/search/yahoo` | POST | 🔮 Yahoo search |
+| `/api/v1/search/stats` | GET | 📈 Engine performance stats |
+| `/health` | GET | ❤️ Health check |
+| `/status` | GET | 📊 Detailed system status |
+| `/docs` | GET | 📚 Swagger documentation |
 
 ## ⚙️ Configuration
 
 ### Environment Variables
 
-Create a `.env` file:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAX_SEARCH_REQUESTS_PER_MINUTE` | 100 | Rate limit |
+| `MAX_CONCURRENT_REQUESTS` | 100 | Concurrent connections |
+| `USE_PROXY` | true | Enable proxy rotation |
+| `ENABLE_FALLBACK` | true | Auto-fallback on failure |
+| `REQUEST_TIMEOUT` | 15 | Request timeout (seconds) |
+| `CACHE_RESULTS` | true | Cache search results |
+| `CACHE_TTL` | 300 | Cache TTL (seconds) |
 
-```env
-# API Configuration
-API_HOST=0.0.0.0
-API_PORT=8000
-API_WORKERS=4
-
-# Rate Limiting
-MAX_SEARCH_REQUESTS_PER_MINUTE=60
-MAX_WEBSITE_REQUESTS_PER_MINUTE=30
-MAX_CONCURRENT_REQUESTS=50
-
-# Redis (optional)
-REDIS_HOST=localhost
-REDIS_PORT=6379
-
-# Proxy (optional)
-USE_PROXY=True
-PROXY_ROTATION=True
-
-# Scraping
-JAVASCRIPT_RENDERING=True
-BROWSER_HEADLESS=True
-REQUEST_TIMEOUT=30
-MAX_RETRIES=3
-```
-
-### Proxy Configuration
-
-Add proxies to `config/proxies.txt`:
-
-```
-http://proxy1.example.com:8080
-http://user:pass@proxy2.example.com:3128
-socks5://proxy3.example.com:1080
-```
-
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for detailed configuration options.
-
-## 📖 Usage
-
-### Python Example
-
-```python
-import requests
-
-BASE_URL = "http://localhost:8000"
-
-# Google Search
-response = requests.post(
-    f"{BASE_URL}/api/v1/search/google",
-    json={
-        "query": "python web scraping",
-        "search_type": "all",
-        "num_results": 10
-    }
-)
-results = response.json()
-print(f"Found {results['total_results']} results")
-
-# Scrape Website
-response = requests.post(
-    f"{BASE_URL}/api/v1/website/scrape",
-    json={
-        "url": "https://example.com",
-        "extract_contacts": True
-    }
-)
-data = response.json()
-print(f"Title: {data['title']}")
-print(f"Emails: {data['contacts']['emails']}")
-
-# Batch Scrape
-response = requests.post(
-    f"{BASE_URL}/api/v1/website/scrape/batch",
-    json={
-        "urls": [
-            "https://example.com",
-            "https://example.org",
-            "https://example.net"
-        ],
-        "max_concurrent": 10
-    }
-)
-batch_data = response.json()
-print(f"Scraped {batch_data['successful']}/{batch_data['total_urls']} sites")
-```
-
-### cURL Examples
-
-```bash
-# Google Search - All Results
-curl -X POST http://localhost:8000/api/v1/search/google \
-  -H "Content-Type: application/json" \
-  -d '{"query": "machine learning", "num_results": 10}'
-
-# Google Search - News
-curl -X POST http://localhost:8000/api/v1/search/google \
-  -H "Content-Type: application/json" \
-  -d '{"query": "latest news", "search_type": "news", "num_results": 20}'
-
-# DuckDuckGo Search
-curl -X POST http://localhost:8000/api/v1/search/duckduckgo \
-  -H "Content-Type: application/json" \
-  -d '{"query": "python tutorial", "num_results": 15}'
-
-# Website Scrape
-curl -X POST http://localhost:8000/api/v1/website/scrape \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com", "extract_contacts": true}'
-
-# Extract Contacts Only
-curl "http://localhost:8000/api/v1/website/extract/contacts?url=https://example.com"
-
-# Deep Scrape (Follow Links)
-curl -X POST http://localhost:8000/api/v1/website/scrape/deep \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://example.com",
-    "max_depth": 2,
-    "max_pages": 50
-  }'
-```
-
-See [docs/USAGE.md](docs/USAGE.md) for comprehensive usage examples.
-
-## 📚 API Documentation
-
-### Interactive Documentation
-
-Once the application is running, access:
-
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-
-### Main Endpoints
-
-#### Search Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/search/google` | POST | Google search |
-| `/api/v1/search/duckduckgo` | POST | DuckDuckGo search |
-| `/api/v1/search/combined` | POST | Both engines simultaneously |
-| `/api/v1/search/google/batch` | POST | Batch Google search |
-| `/api/v1/search/duckduckgo/batch` | POST | Batch DuckDuckGo search |
-
-#### Website Scraping Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/website/scrape` | POST | Scrape single website |
-| `/api/v1/website/scrape/batch` | POST | Scrape multiple websites |
-| `/api/v1/website/scrape/deep` | POST | Deep scrape (follow links) |
-| `/api/v1/website/extract/contacts` | GET | Extract contacts only |
-| `/api/v1/website/extract/content` | GET | Extract content only |
-| `/api/v1/website/extract/metadata` | GET | Extract metadata only |
-
-#### System Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | API information |
-| `/health` | GET | Health check |
-| `/status` | GET | Detailed system status |
+See `.env.example` for all options.
 
 ## 🐳 Docker Deployment
 
-### Using Docker Compose (Recommended)
+### Production
 
 ```bash
-# Start services (API + Redis)
+# Build and start
 docker-compose up -d
 
-# View logs
-docker-compose logs -f
-
-# Stop services
-docker-compose down
-
-# Start with Nginx (production)
-docker-compose --profile production up -d
-```
-
-### Using Docker
-
-```bash
-# Build image
-docker build -t web-scraper .
-
-# Run container
-docker run -d \
-  -p 8000:8000 \
-  -v $(pwd)/config:/app/config \
-  -v $(pwd)/logs:/app/logs \
-  --env-file .env \
-  --name scraper-api \
-  web-scraper
-
-# View logs
-docker logs -f scraper-api
-
-# Stop container
-docker stop scraper-api
-```
-
-### Production Deployment
-
-```bash
-# With Nginx reverse proxy
-docker-compose --profile production up -d
-
-# Scale API instances
+# Scale API workers
 docker-compose up -d --scale api=3
+
+# View logs
+docker-compose logs -f api
 ```
 
-## ⚡ Performance
+### Development
 
-### Benchmarks
-
-- **Search Scraping**: 60+ requests/minute
-- **Website Scraping**: 30+ requests/minute
-- **Concurrent Requests**: 50+ simultaneous
-- **Success Rate**: 95%+ (with proxies and fallbacks)
-
-### Performance Tuning
-
-```env
-# High-performance configuration
-MAX_CONCURRENT_REQUESTS=100
-API_WORKERS=8
-MAX_SEARCH_REQUESTS_PER_MINUTE=120
-MAX_WEBSITE_REQUESTS_PER_MINUTE=60
+```bash
+# Start with hot reload
+docker-compose --profile dev up api-dev
 ```
 
-### Resource Requirements
+## 📈 Performance
 
-| Setup | CPU | RAM | Throughput |
-|-------|-----|-----|------------|
-| Minimal | 1-2 cores | 2GB | 20 req/min |
-| Standard | 4 cores | 8GB | 60 req/min |
-| High | 8+ cores | 16GB | 120+ req/min |
+| Metric | Value |
+|--------|-------|
+| Requests/minute | 50-100+ |
+| Response time | < 1 second (cached) |
+| Response time | 1-3 seconds (uncached) |
+| Supported engines | 4 (Google, DDG, Bing, Yahoo) |
+| Fallback success rate | 95%+ |
 
-## 🏗️ Architecture
+## 🔧 Troubleshooting
 
-### System Components
+### Brotli Encoding Error
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        FastAPI Application                   │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────────┐        ┌──────────────────┐          │
-│  │  Search Scrapers │        │ Website Scraper  │          │
-│  │  - Google        │        │  - Generic       │          │
-│  │  - DuckDuckGo    │        │  - Deep Scrape   │          │
-│  └──────────────────┘        └──────────────────┘          │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────────┐        ┌──────────────────┐          │
-│  │ Content Parsers  │        │ Request Handler  │          │
-│  │  - HTML Parser   │        │  - aiohttp       │          │
-│  │  - Contact Extr. │        │  - Playwright    │          │
-│  │  - Metadata Extr.│        │  - Selenium      │          │
-│  └──────────────────┘        └──────────────────┘          │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │  Proxy Manager   │  │Rate Limiter  │  │Captcha Solver│ │
-│  │  - Rotation      │  │- Token Bucket│  │- Audio/Image │ │
-│  │  - Health Check  │  │- Redis/Memory│  │- Automation  │ │
-│  └──────────────────┘  └──────────────┘  └──────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-                              ↓
-                    ┌──────────────────┐
-                    │      Redis       │
-                    │ (Rate Limiting)  │
-                    └──────────────────┘
-```
+Fixed! The system now uses `Brotli` library properly.
 
-### Request Flow
+### No Results from Google
 
-```
-1. Client Request → FastAPI Endpoint
-2. Rate Limiting Check (Redis/Memory)
-3. Request Handler → Strategy Selection:
-   ├─ Strategy 1: aiohttp + Proxy
-   ├─ Strategy 2: aiohttp + Different Headers
-   ├─ Strategy 3: Playwright (Browser)
-   └─ Strategy 4: Selenium (Browser)
-4. Content Parser → Extract & Categorize
-5. Response → Client
-```
+The system automatically falls back to DuckDuckGo, Bing, or Yahoo.
 
-### Technologies
+### Slow Responses
 
-- **Framework**: FastAPI (async)
-- **HTTP Client**: aiohttp (async)
-- **HTML Parsing**: BeautifulSoup4, lxml
-- **Browser Automation**: Playwright, Selenium
-- **Rate Limiting**: Redis, in-memory fallback
-- **Proxy Support**: HTTP, HTTPS, SOCKS5
-- **Captcha**: Tesseract OCR, browser automation
-- **Contact Extraction**: phonenumbers, email-validator
-- **Structured Data**: extruct
+1. Enable caching: `CACHE_RESULTS=true`
+2. Use fast search: `/api/v1/search/fast`
+3. Enable proxies: `USE_PROXY=true`
 
-## 🔧 Advanced Features
+### Rate Limited
 
-### 1. Multiple Fallback Methods
-
-Each request tries 2-3 different methods automatically:
-- aiohttp with proxy rotation
-- aiohttp with different headers/user agents
-- Playwright browser automation
-- Selenium browser automation
-
-### 2. Proxy Management
-
-- Automatic proxy rotation
-- Health checking every 5 minutes
-- Failure tracking and auto-disable
-- Support for HTTP, HTTPS, SOCKS5
-
-### 3. Rate Limiting
-
-- Token bucket algorithm
-- Per-endpoint limits
-- Redis-backed (distributed)
-- Automatic queueing
-
-### 4. Content Extraction
-
-- Intelligent paragraph detection
-- Contact information extraction
-- Structured data parsing (JSON-LD, Open Graph)
-- Image and link extraction
-- Table parsing
-
-### 5. Error Handling
-
-- Automatic retries with exponential backoff
-- Multiple fallback strategies
-- Detailed error logging
-- Graceful degradation
-
-## 📁 Project Structure
-
-```
-web-scraping-system/
-├── app/
-│   ├── api/                    # API endpoints
-│   │   ├── search_scraper.py   # Search API
-│   │   └── website_scraper.py  # Website API
-│   ├── core/                   # Core utilities
-│   │   ├── proxy_manager.py    # Proxy rotation
-│   │   ├── request_handler.py  # HTTP requests
-│   │   ├── rate_limiter.py     # Rate limiting
-│   │   └── captcha_solver.py   # Captcha solving
-│   ├── scrapers/               # Scraper implementations
-│   │   ├── google_scraper.py   # Google scraper
-│   │   ├── duckduckgo_scraper.py # DuckDuckGo scraper
-│   │   └── generic_scraper.py  # Generic scraper
-│   ├── parsers/                # Content parsers
-│   │   ├── content_parser.py   # HTML parser
-│   │   └── contact_extractor.py # Contact extractor
-│   ├── config/                 # Configuration
-│   │   └── settings.py         # Settings manager
-│   ├── utils/                  # Utilities
-│   │   ├── user_agents.py      # User agent rotation
-│   │   └── helpers.py          # Helper functions
-│   └── main.py                 # FastAPI application
-├── config/                     # Configuration files
-│   ├── config.yaml             # Main config
-│   ├── proxies.txt             # HTTP proxies
-│   └── socks_proxies.txt       # SOCKS5 proxies
-├── docs/                       # Documentation
-│   ├── SETUP.md                # Setup guide
-│   ├── USAGE.md                # Usage guide
-│   └── CONFIGURATION.md        # Config guide
-├── logs/                       # Log files
-├── requirements.txt            # Python dependencies
-├── Dockerfile                  # Docker image
-├── docker-compose.yml          # Docker Compose
-├── .env.example                # Environment template
-└── README.md                   # This file
-```
-
-## 🛡️ Security
-
-### Best Practices
-
-1. **Use environment variables** for sensitive data
-2. **Enable authentication** for production (not included)
-3. **Use HTTPS** with reverse proxy (Nginx)
-4. **Restrict CORS origins** in production
-5. **Keep proxies private** (don't commit to Git)
-6. **Regular security updates** for dependencies
-
-### Rate Limiting
-
-Built-in rate limiting protects against abuse:
-- 60 search requests/minute
-- 30 website scrapes/minute
-- Configurable per endpoint
-
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these guidelines:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+1. Add more proxies to `config/proxies.txt`
+2. Reduce `MAX_SEARCH_REQUESTS_PER_MINUTE`
+3. Enable proxy rotation: `PROXY_ROTATION=true`
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License - See LICENSE file
 
-## ⚠️ Legal Disclaimer
+## 🤝 Contributing
 
-This tool is for educational and legitimate use only. Users are responsible for:
-
-1. **Respecting robots.txt** and website terms of service
-2. **Complying with applicable laws** in their jurisdiction
-3. **Respecting rate limits** and not overloading servers
-4. **Using appropriate authorization** when required
-5. **Handling personal data** in compliance with privacy laws (GDPR, CCPA, etc.)
-
-The authors assume no liability for misuse of this software.
-
-## 🙏 Acknowledgments
-
-- FastAPI for the excellent web framework
-- Playwright and Selenium for browser automation
-- BeautifulSoup4 for HTML parsing
-- All open-source contributors
-
-## 📞 Support
-
-- **Documentation**: See `/docs` folder
-- **API Docs**: http://localhost:8000/docs
-- **Issues**: GitHub Issues (if applicable)
-- **Logs**: Check `logs/scraper.log`
-
-## 🗺️ Roadmap
-
-- [ ] API authentication and authorization
-- [ ] Webhook support for async scraping
-- [ ] Database integration for result storage
-- [ ] Advanced scheduling and cron jobs
-- [ ] More search engines (Bing, Yahoo, etc.)
-- [ ] PDF and document parsing
-- [ ] Machine learning for content classification
-- [ ] Distributed scraping cluster support
+Contributions welcome! Please read the contributing guidelines.
 
 ---
 
-**Built with ❤️ using Python and FastAPI**
+**Built for high-performance, production-ready search scraping.** 🚀

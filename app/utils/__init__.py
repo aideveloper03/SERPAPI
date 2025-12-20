@@ -1,4 +1,21 @@
-from .user_agents import UserAgentRotator
-from .helpers import *
+"""
+Utility functions and classes for the scraping system
+"""
+import uuid
+from typing import Optional
 
-__all__ = ["UserAgentRotator", "sanitize_url", "extract_domain", "generate_request_id"]
+from .user_agents import UserAgentRotator, get_user_agent_rotator
+from .helpers import clean_text, sanitize_url
+
+__all__ = [
+    'UserAgentRotator',
+    'get_user_agent_rotator',
+    'clean_text',
+    'sanitize_url',
+    'generate_request_id',
+]
+
+
+def generate_request_id() -> str:
+    """Generate a unique request ID"""
+    return str(uuid.uuid4())[:8]

@@ -1,134 +1,95 @@
-# Makefile for Web Scraping System
+# Search Engine Scraping System - Makefile
+# Easy commands for development and deployment
 
-.PHONY: help install run dev test clean docker-build docker-run docker-stop logs setup check
+.PHONY: help install run dev test docker docker-dev clean
 
 # Default target
 help:
-	@echo "Web Scraping System - Available Commands:"
 	@echo ""
-	@echo "  make install       Install dependencies"
-	@echo "  make setup         Initial setup (install + configure)"
-	@echo "  make run           Run production server"
-	@echo "  make dev           Run development server (with reload)"
-	@echo "  make test          Run tests"
-	@echo "  make check         Check configuration"
-	@echo "  make clean         Clean temporary files"
+	@echo "🔍 Search Engine Scraping System"
+	@echo "================================="
 	@echo ""
-	@echo "  make docker-build  Build Docker image"
-	@echo "  make docker-run    Run with Docker Compose"
-	@echo "  make docker-stop   Stop Docker containers"
-	@echo "  make docker-logs   View Docker logs"
-	@echo ""
-	@echo "  make logs          View application logs"
-	@echo "  make health        Check API health"
+	@echo "Commands:"
+	@echo "  make install     Install dependencies"
+	@echo "  make run         Run the API server"
+	@echo "  make dev         Run with hot reload (development)"
+	@echo "  make docker      Start with Docker Compose"
+	@echo "  make docker-dev  Start Docker in development mode"
+	@echo "  make test        Run example tests"
+	@echo "  make verify      Verify installation"
+	@echo "  make logs        View Docker logs"
+	@echo "  make stop        Stop Docker containers"
+	@echo "  make clean       Clean up cache files"
 	@echo ""
 
-# Installation
+# Install dependencies
 install:
-	@echo "Installing Python dependencies..."
+	@echo "📦 Installing dependencies..."
 	pip install -r requirements.txt
-	@echo "Installing Playwright browsers..."
 	playwright install chromium
-	@echo "Installation complete!"
+	@echo "✅ Installation complete!"
 
-# Initial setup
-setup: install
-	@echo "Setting up configuration..."
-	@if [ ! -f .env ]; then \
-		cp .env.example .env; \
-		echo "Created .env file. Please edit with your settings."; \
-	else \
-		echo ".env file already exists."; \
-	fi
-	@mkdir -p logs
-	@echo "Setup complete!"
-	@echo ""
-	@echo "Next steps:"
-	@echo "  1. Edit .env file with your settings"
-	@echo "  2. Add proxies to config/proxies.txt (optional)"
-	@echo "  3. Run 'make dev' to start development server"
-
-# Run production server
+# Run the API server
 run:
-	@echo "Starting production server..."
-	python run.py --workers 4
+	@echo "🚀 Starting API server..."
+	python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-# Run development server
+# Run in development mode with hot reload
 dev:
-	@echo "Starting development server..."
-	python run.py --reload --log-level debug
+	@echo "🔧 Starting in development mode..."
+	python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --log-level debug
 
-# Run tests
-test:
-	@echo "Running tests..."
-	pytest tests/ -v
-
-# Check configuration
-check:
-	@echo "Checking configuration..."
-	@python -c "from app.config import settings; print('Configuration loaded successfully')"
-	@python -c "import yaml; yaml.safe_load(open('config/config.yaml')); print('YAML config valid')"
-	@if command -v redis-cli > /dev/null; then \
-		echo "Testing Redis connection..."; \
-		redis-cli ping || echo "Redis not available (will use in-memory rate limiting)"; \
-	else \
-		echo "Redis CLI not found (optional)"; \
-	fi
-	@echo "Configuration check complete!"
-
-# Clean temporary files
-clean:
-	@echo "Cleaning temporary files..."
-	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete
-	find . -type f -name "*.pyo" -delete
-	find . -type f -name "*.log" -delete
-	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
-	@echo "Cleanup complete!"
-
-# Docker commands
-docker-build:
-	@echo "Building Docker image..."
-	docker build -t web-scraper .
-
-docker-run:
-	@echo "Starting services with Docker Compose..."
+# Start with Docker Compose
+docker:
+	@echo "🐳 Starting Docker containers..."
 	docker-compose up -d
-	@echo "Services started!"
-	@echo "API: http://localhost:8000"
-	@echo "Docs: http://localhost:8000/docs"
+	@echo "✅ API available at http://localhost:8000"
+	@echo "📚 Docs at http://localhost:8000/docs"
 
-docker-stop:
-	@echo "Stopping Docker containers..."
+# Start Docker in development mode
+docker-dev:
+	@echo "🐳 Starting Docker in development mode..."
+	docker-compose --profile dev up api-dev
+
+# Build Docker image
+docker-build:
+	@echo "🔨 Building Docker image..."
+	docker-compose build
+
+# Run example tests
+test:
+	@echo "🧪 Running example tests..."
+	python examples/example_usage.py
+
+# Verify installation
+verify:
+	@echo "🔍 Verifying installation..."
+	python verify_installation.py
+
+# View Docker logs
+logs:
+	docker-compose logs -f api
+
+# Stop Docker containers
+stop:
+	@echo "🛑 Stopping containers..."
 	docker-compose down
 
-docker-logs:
-	@echo "Viewing Docker logs..."
-	docker-compose logs -f
+# Clean up
+clean:
+	@echo "🧹 Cleaning up..."
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+	rm -rf logs/*.log 2>/dev/null || true
+	@echo "✅ Cleanup complete!"
 
-# View logs
-logs:
-	@echo "Viewing application logs..."
-	@if [ -f logs/scraper.log ]; then \
-		tail -f logs/scraper.log; \
-	else \
-		echo "No log file found. Start the application first."; \
-	fi
-
-# Health check
+# Quick health check
 health:
-	@echo "Checking API health..."
-	@curl -s http://localhost:8000/health | python -m json.tool || echo "API not running"
+	@curl -s http://localhost:8000/health | python3 -m json.tool || echo "❌ API not running"
 
-# Format code
-format:
-	@echo "Formatting code..."
-	@command -v black > /dev/null && black app/ || echo "black not installed"
-	@command -v isort > /dev/null && isort app/ || echo "isort not installed"
-
-# Lint code
-lint:
-	@echo "Linting code..."
-	@command -v flake8 > /dev/null && flake8 app/ || echo "flake8 not installed"
-	@command -v pylint > /dev/null && pylint app/ || echo "pylint not installed"
+# Quick search test
+search:
+	@curl -s -X POST http://localhost:8000/api/v1/search/fast \
+		-H "Content-Type: application/json" \
+		-d '{"query": "python programming", "num_results": 3}' | python3 -m json.tool
