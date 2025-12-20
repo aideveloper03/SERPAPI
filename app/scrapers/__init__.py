@@ -8,6 +8,7 @@ from .duckduckgo_scraper import DuckDuckGoScraper
 from .bing_scraper import BingScraper
 from .yahoo_scraper import YahooScraper
 from .unified_search import UnifiedSearch, unified_search, SearchEngine, SearchResult
+from .generic_scraper import GenericScraper
 
 __all__ = [
     'GoogleScraper',
@@ -18,4 +19,5 @@ __all__ = [
     'unified_search',
     'SearchEngine',
     'SearchResult',
+    'GenericScraper',
 ]

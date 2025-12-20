@@ -3,10 +3,10 @@ Configuration management using Pydantic settings
 High-performance settings for production scraping
 """
 import os
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from pathlib import Path
 import yaml
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -14,64 +14,86 @@ class Settings(BaseSettings):
     """Application settings optimized for high-volume scraping"""
     
     # API Configuration
-    api_host: str = Field(default="0.0.0.0", env="API_HOST")
-    api_port: int = Field(default=8000, env="API_PORT")
-    api_workers: int = Field(default=4, env="API_WORKERS")
-    debug: bool = Field(default=False, env="DEBUG")
+    api_host: str = Field(default="0.0.0.0")
+    api_port: int = Field(default=8000)
+    api_workers: int = Field(default=4)
+    debug: bool = Field(default=False)
     
     # Rate Limiting (optimized for 50+ requests/minute)
-    max_search_requests_per_minute: int = Field(default=100, env="MAX_SEARCH_REQUESTS_PER_MINUTE")
-    max_website_requests_per_minute: int = Field(default=60, env="MAX_WEBSITE_REQUESTS_PER_MINUTE")
-    max_concurrent_requests: int = Field(default=100, env="MAX_CONCURRENT_REQUESTS")
+    max_search_requests_per_minute: int = Field(default=100)
+    max_website_requests_per_minute: int = Field(default=60)
+    max_concurrent_requests: int = Field(default=100)
     
     # Redis Configuration
-    redis_host: str = Field(default="localhost", env="REDIS_HOST")
-    redis_port: int = Field(default=6379, env="REDIS_PORT")
-    redis_db: int = Field(default=0, env="REDIS_DB")
-    redis_password: Optional[str] = Field(default=None, env="REDIS_PASSWORD")
+    redis_host: str = Field(default="localhost")
+    redis_port: int = Field(default=6379)
+    redis_db: int = Field(default=0)
+    redis_password: Optional[str] = Field(default=None)
     
     # Proxy Configuration
-    use_proxy: bool = Field(default=True, env="USE_PROXY")
-    proxy_rotation: bool = Field(default=True, env="PROXY_ROTATION")
-    proxy_timeout: int = Field(default=15, env="PROXY_TIMEOUT")
-    auto_fetch_proxies: bool = Field(default=True, env="AUTO_FETCH_PROXIES")
+    use_proxy: bool = Field(default=True)
+    proxy_rotation: bool = Field(default=True)
+    proxy_timeout: int = Field(default=15)
+    auto_fetch_proxies: bool = Field(default=True)
     
     # Captcha Solving (optional API keys)
-    enable_captcha_solver: bool = Field(default=True, env="ENABLE_CAPTCHA_SOLVER")
-    captcha_timeout: int = Field(default=120, env="CAPTCHA_TIMEOUT")
-    twocaptcha_api_key: Optional[str] = Field(default=None, env="TWOCAPTCHA_API_KEY")
-    anticaptcha_api_key: Optional[str] = Field(default=None, env="ANTICAPTCHA_API_KEY")
-    capmonster_api_key: Optional[str] = Field(default=None, env="CAPMONSTER_API_KEY")
+    enable_captcha_solver: bool = Field(default=True)
+    captcha_timeout: int = Field(default=120)
+    twocaptcha_api_key: Optional[str] = Field(default=None)
+    anticaptcha_api_key: Optional[str] = Field(default=None)
+    capmonster_api_key: Optional[str] = Field(default=None)
     
     # Request Configuration (optimized for speed)
-    request_timeout: int = Field(default=15, env="REQUEST_TIMEOUT")
-    max_retries: int = Field(default=2, env="MAX_RETRIES")
-    retry_delay: float = Field(default=0.5, env="RETRY_DELAY")
+    request_timeout: int = Field(default=15)
+    max_retries: int = Field(default=2)
+    retry_delay: float = Field(default=0.5)
+    
+    @field_validator('retry_delay', mode='before')
+    @classmethod
+    def parse_retry_delay(cls, v: Any) -> float:
+        """Parse retry_delay from string or number"""
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            try:
+                return float(v)
+            except ValueError:
+                return 0.5
+        return 0.5
     
     # Scraping Configuration
-    javascript_rendering: bool = Field(default=True, env="JAVASCRIPT_RENDERING")
-    browser_headless: bool = Field(default=True, env="BROWSER_HEADLESS")
-    page_load_timeout: int = Field(default=15, env="PAGE_LOAD_TIMEOUT")
+    javascript_rendering: bool = Field(default=True)
+    browser_headless: bool = Field(default=True)
+    page_load_timeout: int = Field(default=15)
     
     # Search Configuration
-    default_search_engine: str = Field(default="google", env="DEFAULT_SEARCH_ENGINE")
-    enable_fallback: bool = Field(default=True, env="ENABLE_FALLBACK")
-    cache_results: bool = Field(default=True, env="CACHE_RESULTS")
-    cache_ttl: int = Field(default=300, env="CACHE_TTL")  # 5 minutes
+    default_search_engine: str = Field(default="google")
+    enable_fallback: bool = Field(default=True)
+    cache_results: bool = Field(default=True)
+    cache_ttl: int = Field(default=300)  # 5 minutes
     
     # Logging
-    log_level: str = Field(default="INFO", env="LOG_LEVEL")
-    log_file: str = Field(default="logs/scraper.log", env="LOG_FILE")
+    log_level: str = Field(default="INFO")
+    log_file: str = Field(default="logs/scraper.log")
+    
+    # Captcha avoidance settings
+    captcha_avoidance_enabled: bool = Field(default=True)
+    use_stealth_mode: bool = Field(default=True)
+    randomize_request_timing: bool = Field(default=True)
+    min_request_delay: float = Field(default=0.5)
+    max_request_delay: float = Field(default=2.0)
     
     # Paths
     base_dir: Path = Path(__file__).resolve().parent.parent.parent
     config_dir: Path = base_dir / "config"
     logs_dir: Path = base_dir / "logs"
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+        "env_prefix": "",
+    }
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
