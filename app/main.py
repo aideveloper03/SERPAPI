@@ -1,6 +1,7 @@
 """
 Main FastAPI Application
-High-Volume Concurrent Web Scraping System
+High-Performance Search Engine Scraping System
+Supports: Google, DuckDuckGo, Bing, Yahoo with automatic fallback
 """
 import sys
 from contextlib import asynccontextmanager
@@ -38,7 +39,9 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for startup and shutdown events
     """
     # Startup
-    logger.info("Starting Web Scraping System...")
+    logger.info("=" * 60)
+    logger.info("Starting High-Performance Search Scraping System...")
+    logger.info("=" * 60)
     
     try:
         # Initialize core components
@@ -51,12 +54,17 @@ async def lifespan(app: FastAPI):
         logger.info(f"API running on {settings.api_host}:{settings.api_port}")
         logger.info(f"Max concurrent requests: {settings.max_concurrent_requests}")
         logger.info(f"Search rate limit: {settings.max_search_requests_per_minute}/min")
-        logger.info(f"Website rate limit: {settings.max_website_requests_per_minute}/min")
+        logger.info(f"Default search engine: {settings.default_search_engine}")
+        logger.info(f"Fallback enabled: {settings.enable_fallback}")
         
         # Show proxy stats
         if settings.use_proxy:
             proxy_stats = proxy_manager.get_stats()
-            logger.info(f"Proxies loaded: {proxy_stats['total_proxies']} ({proxy_stats['working_proxies']} working)")
+            logger.info(f"Proxies: {proxy_stats['working_proxies']}/{proxy_stats['total_proxies']} working")
+        
+        logger.info("=" * 60)
+        logger.info("System ready - Supported engines: Google, DuckDuckGo, Bing, Yahoo")
+        logger.info("=" * 60)
         
     except Exception as e:
         logger.error(f"Initialization error: {e}")
@@ -78,9 +86,35 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="Web Scraping System API",
-    description="High-volume concurrent web scraping with search engine and generic website scrapers",
-    version="1.0.0",
+    title="Search Engine Scraping API",
+    description="""
+## High-Performance Multi-Engine Search Scraping System
+
+### Features
+- 🔍 **4 Search Engines**: Google, DuckDuckGo, Bing, Yahoo
+- ⚡ **Fast**: Optimized for sub-second responses
+- 🔄 **Automatic Fallback**: Never miss results
+- 🛡️ **Anti-Detection**: 8+ spoofing strategies
+- 🌐 **Proxy Rotation**: Built-in proxy management
+- 📦 **Batch Processing**: Handle 50+ requests/minute
+- 🔒 **Captcha Solving**: 2Captcha, Anti-Captcha integration
+
+### Recommended Endpoints
+1. `/api/v1/search/unified` - Smart search with automatic fallback
+2. `/api/v1/search/fast` - Speed-optimized search
+3. `/api/v1/search/parallel` - Search all engines at once
+
+### Anti-Detection Strategies
+1. curl_cffi browser impersonation
+2. TLS fingerprint mimicking
+3. User-Agent rotation
+4. Proxy rotation (HTTP/SOCKS5)
+5. Header variation
+6. Request timing randomization
+7. Cookie persistence
+8. Playwright stealth mode
+    """,
+    version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan
@@ -101,11 +135,16 @@ app.add_middleware(
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log all requests"""
-    logger.info(f"Request: {request.method} {request.url.path}")
+    import time
+    start_time = time.time()
     
     try:
         response = await call_next(request)
-        logger.info(f"Response: {response.status_code}")
+        duration = time.time() - start_time
+        
+        if request.url.path not in ["/health", "/docs", "/openapi.json"]:
+            logger.info(f"{request.method} {request.url.path} - {response.status_code} ({duration:.2f}s)")
+        
         return response
     except Exception as e:
         logger.error(f"Request error: {str(e)}")
@@ -125,24 +164,26 @@ app.include_router(website_router)
 async def root():
     """Root endpoint with API information"""
     return {
-        "name": "Web Scraping System API",
-        "version": "1.0.0",
+        "name": "Search Engine Scraping API",
+        "version": "2.0.0",
         "status": "operational",
+        "description": "High-performance multi-engine search scraping with automatic fallback",
         "endpoints": {
-            "search_scrapers": {
-                "google": "/api/v1/search/google",
-                "duckduckgo": "/api/v1/search/duckduckgo",
-                "combined": "/api/v1/search/combined",
-                "batch_google": "/api/v1/search/google/batch",
-                "batch_duckduckgo": "/api/v1/search/duckduckgo/batch"
+            "recommended": {
+                "unified_search": "POST /api/v1/search/unified",
+                "fast_search": "POST /api/v1/search/fast",
+                "parallel_search": "POST /api/v1/search/parallel",
+                "batch_search": "POST /api/v1/search/batch"
+            },
+            "individual_engines": {
+                "google": "POST /api/v1/search/google",
+                "duckduckgo": "POST /api/v1/search/duckduckgo",
+                "bing": "POST /api/v1/search/bing",
+                "yahoo": "POST /api/v1/search/yahoo"
             },
             "website_scraper": {
-                "scrape": "/api/v1/website/scrape",
-                "batch": "/api/v1/website/scrape/batch",
-                "deep": "/api/v1/website/scrape/deep",
-                "contacts": "/api/v1/website/extract/contacts",
-                "content": "/api/v1/website/extract/content",
-                "metadata": "/api/v1/website/extract/metadata"
+                "scrape": "POST /api/v1/website/scrape",
+                "batch": "POST /api/v1/website/scrape/batch"
             },
             "documentation": {
                 "swagger": "/docs",
@@ -150,22 +191,21 @@ async def root():
             }
         },
         "features": [
-            "High-volume concurrent scraping",
-            "Proxy rotation and IP masking",
-            "Captcha detection and solving",
-            "Multiple fallback methods",
-            "Rate limiting",
-            "Content categorization",
-            "Contact information extraction",
-            "Search engine scraping (Google, DuckDuckGo)",
-            "Generic website scraping"
+            "4 search engines (Google, DuckDuckGo, Bing, Yahoo)",
+            "Automatic fallback on failure",
+            "8+ anti-detection strategies",
+            "Proxy rotation with auto-fetching",
+            "Captcha solving (2Captcha, Anti-Captcha)",
+            "Result caching for speed",
+            "Batch processing (50+ req/min)",
+            "Docker ready"
         ],
         "configuration": {
-            "max_search_per_minute": settings.max_search_requests_per_minute,
-            "max_website_per_minute": settings.max_website_requests_per_minute,
+            "max_requests_per_minute": settings.max_search_requests_per_minute,
             "max_concurrent": settings.max_concurrent_requests,
             "proxy_enabled": settings.use_proxy,
-            "captcha_solver_enabled": settings.enable_captcha_solver
+            "fallback_enabled": settings.enable_fallback,
+            "cache_enabled": settings.cache_results
         }
     }
 
@@ -173,69 +213,49 @@ async def root():
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    """Global health check"""
-    proxy_stats = proxy_manager.get_stats() if settings.use_proxy else None
-    
+    """Quick health check"""
     return {
         "status": "healthy",
-        "version": "1.0.0",
-        "components": {
-            "proxy_manager": "operational" if settings.use_proxy else "disabled",
-            "request_handler": "operational",
-            "rate_limiters": "operational",
-            "captcha_solver": "operational" if settings.enable_captcha_solver else "disabled"
-        },
-        "proxy_stats": proxy_stats
+        "version": "2.0.0"
     }
 
 
-# Status endpoint
+# Detailed status endpoint
 @app.get("/status")
 async def status():
     """Detailed system status"""
-    proxy_stats = proxy_manager.get_stats() if settings.use_proxy else {"total_proxies": 0, "working_proxies": 0}
+    proxy_stats = proxy_manager.get_stats() if settings.use_proxy else {}
     
     return {
-        "system": "Web Scraping System",
-        "version": "1.0.0",
+        "system": "Search Engine Scraping System",
+        "version": "2.0.0",
         "status": "operational",
+        "engines": {
+            "google": "active",
+            "duckduckgo": "active",
+            "bing": "active",
+            "yahoo": "active"
+        },
         "configuration": {
-            "api_host": settings.api_host,
-            "api_port": settings.api_port,
-            "debug_mode": settings.debug,
-            "max_concurrent_requests": settings.max_concurrent_requests,
-            "max_search_per_minute": settings.max_search_requests_per_minute,
-            "max_website_per_minute": settings.max_website_requests_per_minute,
+            "max_concurrent": settings.max_concurrent_requests,
+            "max_requests_per_minute": settings.max_search_requests_per_minute,
             "request_timeout": settings.request_timeout,
-            "max_retries": settings.max_retries,
             "proxy_enabled": settings.use_proxy,
-            "proxy_rotation": settings.proxy_rotation,
-            "captcha_solver_enabled": settings.enable_captcha_solver,
-            "javascript_rendering": settings.javascript_rendering
+            "fallback_enabled": settings.enable_fallback,
+            "cache_enabled": settings.cache_results,
+            "captcha_solver": settings.enable_captcha_solver
         },
         "proxy_stats": proxy_stats,
-        "capabilities": {
-            "search_engines": ["google", "duckduckgo"],
-            "search_types": ["all", "news", "images", "videos"],
-            "scraping_methods": ["aiohttp", "playwright", "selenium"],
-            "content_extraction": [
-                "paragraphs",
-                "headings",
-                "lists",
-                "tables",
-                "images",
-                "links",
-                "contacts",
-                "metadata",
-                "structured_data"
-            ],
-            "contact_extraction": [
-                "emails",
-                "phones",
-                "social_media",
-                "addresses"
-            ]
-        }
+        "anti_detection_strategies": [
+            "curl_cffi_impersonation",
+            "tls_fingerprint_mimicking",
+            "user_agent_rotation",
+            "proxy_rotation",
+            "header_variation",
+            "request_timing_randomization",
+            "cookie_persistence",
+            "playwright_stealth"
+        ]
     }
 
 

@@ -1,11 +1,13 @@
-# Multi-stage Dockerfile for Web Scraping System
+# Multi-stage Dockerfile for High-Performance Search Scraping System
+# Optimized for fast builds and small image size
+
+# Stage 1: Builder
 FROM python:3.11-slim as builder
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     make \
@@ -13,26 +15,26 @@ RUN apt-get update && apt-get install -y \
     libxslt-dev \
     libffi-dev \
     libssl-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+# Copy and install Python dependencies
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Production stage
+# Stage 2: Production
 FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+# Install runtime dependencies including Chromium for Playwright
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Core utilities
     curl \
     wget \
     gnupg \
     ca-certificates \
+    # Chrome/Playwright dependencies
     fonts-liberation \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -54,32 +56,50 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
     libu2f-udev \
     libvulkan1 \
+    # OCR for captcha solving
     tesseract-ocr \
-    && rm -rf /var/lib/apt/lists/*
+    tesseract-ocr-eng \
+    # Image processing
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# Copy Python dependencies from builder
+# Copy Python packages from builder
 COPY --from=builder /root/.local /root/.local
-
-# Make sure scripts in .local are usable
 ENV PATH=/root/.local/bin:$PATH
 
 # Copy application code
 COPY app/ /app/app/
 COPY config/ /app/config/
+COPY run.py /app/
+
+# Copy environment example
 COPY .env.example /app/.env
 
-# Create logs directory
-RUN mkdir -p /app/logs
+# Create necessary directories
+RUN mkdir -p /app/logs /app/config
 
-# Install Playwright browsers
-RUN playwright install chromium
+# Install Playwright browsers (Chromium only for size)
+RUN playwright install chromium \
+    && playwright install-deps chromium
+
+# Create non-root user for security
+RUN useradd -m -u 1000 scraper \
+    && chown -R scraper:scraper /app
+# Note: Running as root for Playwright compatibility in Docker
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
 
 # Expose port
 EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run application
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

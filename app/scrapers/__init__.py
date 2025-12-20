@@ -1,5 +1,21 @@
+"""
+Search Engine Scrapers
+Provides fast, reliable scraping for multiple search engines with automatic fallback
+"""
+
 from .google_scraper import GoogleScraper
 from .duckduckgo_scraper import DuckDuckGoScraper
-from .generic_scraper import GenericScraper
+from .bing_scraper import BingScraper
+from .yahoo_scraper import YahooScraper
+from .unified_search import UnifiedSearch, unified_search, SearchEngine, SearchResult
 
-__all__ = ["GoogleScraper", "DuckDuckGoScraper", "GenericScraper"]
+__all__ = [
+    'GoogleScraper',
+    'DuckDuckGoScraper',
+    'BingScraper',
+    'YahooScraper',
+    'UnifiedSearch',
+    'unified_search',
+    'SearchEngine',
+    'SearchResult',
+]
