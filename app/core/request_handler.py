@@ -16,7 +16,7 @@ from loguru import logger
 from app.config import settings
 from app.utils import UserAgentRotator, generate_request_id
 from .proxy_manager import proxy_manager
-from .captcha_solver import captcha_solver
+from .captcha_solver import captcha_solver, CaptchaAvoider
 
 # Try to import optional libraries
 try:
@@ -709,32 +709,12 @@ class RequestHandler:
             
             page = await context.new_page()
             
-            # Inject stealth scripts BEFORE navigation
+            # Inject comprehensive stealth scripts from CaptchaAvoider
+            await page.add_init_script(CaptchaAvoider.get_stealth_scripts())
+            
+            # Additional anti-detection script
             await page.add_init_script("""
-                // Comprehensive stealth mode
-                
-                // Override navigator.webdriver
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                
-                // Override chrome property
-                window.chrome = {
-                    runtime: {},
-                    loadTimes: function() {},
-                    csi: function() {},
-                    app: {}
-                };
-                
-                // Override permissions API
-                const originalQuery = window.navigator.permissions.query;
-                window.navigator.permissions.query = (parameters) => (
-                    parameters.name === 'notifications' ?
-                        Promise.resolve({ state: Notification.permission }) :
-                        originalQuery(parameters)
-                );
-                
-                // Mock plugins
+                // Extra stealth measures
                 Object.defineProperty(navigator, 'plugins', {
                     get: () => {
                         return [
@@ -801,11 +781,26 @@ class RequestHandler:
             # Short wait for dynamic content
             await asyncio.sleep(1)
             
-            # Check for Cloudflare/captcha
+            # Check for Cloudflare/captcha and attempt bypass
             content = await page.content()
             if "cloudflare" in content.lower() or "checking your browser" in content.lower():
-                logger.debug("Cloudflare detected, waiting...")
-                await asyncio.sleep(5)
+                logger.debug("Cloudflare detected, attempting bypass...")
+                # Use the captcha solver's Cloudflare bypass
+                bypass_success = await captcha_solver.bypass_cloudflare(page)
+                if bypass_success:
+                    logger.info("Cloudflare bypass successful")
+                content = await page.content()
+            
+            # Check for other captchas
+            captcha_info = await captcha_solver.detect_captcha(content, page)
+            if captcha_info:
+                logger.debug(f"Captcha detected: {captcha_info['type']}, attempting solve...")
+                await captcha_solver.solve(
+                    captcha_type=captcha_info['type'],
+                    page=page,
+                    site_key=captcha_info.get('site_key')
+                )
+                await asyncio.sleep(2)
                 content = await page.content()
             
             html = content

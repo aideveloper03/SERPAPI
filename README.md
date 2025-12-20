@@ -99,9 +99,9 @@ response = requests.post("http://localhost:8000/api/v1/search/batch", json={
 })
 ```
 
-## 🛡️ Anti-Detection Strategies
+## 🛡️ Anti-Detection & Stealth Strategies
 
-This system implements **8+ anti-detection strategies** to avoid blocking:
+This system implements **8+ anti-detection strategies** to avoid blocking and captchas:
 
 | Strategy | Description |
 |----------|-------------|
@@ -109,10 +109,25 @@ This system implements **8+ anti-detection strategies** to avoid blocking:
 | **TLS Fingerprint** | Real browser TLS signatures |
 | **User-Agent Rotation** | 30+ modern browser UAs (2024) |
 | **Proxy Rotation** | Auto-fetched from 8+ sources |
-| **Header Variation** | Realistic browser headers |
-| **Request Timing** | Human-like delays |
-| **Cookie Persistence** | Session management |
-| **Playwright Stealth** | Full browser automation with stealth |
+| **Header Variation** | Realistic browser headers with Sec-CH-UA |
+| **Request Timing** | Human-like random delays |
+| **Cookie Persistence** | Session management across requests |
+| **Playwright Stealth** | Full browser automation with comprehensive stealth |
+
+### 🕵️ Stealth JavaScript Features
+
+When using browser mode, the following fingerprinting protections are applied:
+
+- ✅ `navigator.webdriver` hidden
+- ✅ Chrome runtime mocked
+- ✅ Plugins array populated
+- ✅ WebGL vendor/renderer masked
+- ✅ Canvas fingerprint noise added
+- ✅ Audio context fingerprint masked
+- ✅ Timezone consistency
+- ✅ Hardware concurrency spoofed
+- ✅ Device memory spoofed
+- ✅ Permissions API hooked
 
 ## 🌐 Proxy Configuration
 
@@ -135,26 +150,38 @@ http://ip:port
 socks5://ip:port
 ```
 
-## 🔐 Captcha Solving
+## 🔐 Captcha Handling
 
-Supports automatic captcha solving with paid services:
+### Built-in Local Captcha Solver (No External API Required!)
 
-### 2Captcha
+The system includes a **powerful local captcha solver** that works without external APIs:
+
+| Captcha Type | Method | Success Rate |
+|--------------|--------|--------------|
+| **Image Captchas** | OCR with multiple preprocessing pipelines | High |
+| **reCAPTCHA v2** | Checkbox click + audio challenge | Good |
+| **reCAPTCHA v3** | Stealth mode (score-based auto-pass) | Excellent |
+| **Cloudflare** | Auto-bypass with stealth scripts | Excellent |
+| **hCaptcha** | Checkbox method | Good |
+
+### Captcha Avoidance (Primary Strategy)
+
+The system **prioritizes avoidance over solving** using:
+- 🕵️ Comprehensive stealth JavaScript injection
+- 🎭 WebGL/Canvas fingerprint masking
+- 🔄 User-agent and TLS fingerprint rotation
+- ⏱️ Human-like delays and mouse movements
+- 🌐 Proxy rotation
+
+### Optional: External API Support
+
+For enhanced solving of complex captchas, add API keys:
 
 ```bash
-export TWOCAPTCHA_API_KEY=your_api_key
-```
-
-### Anti-Captcha
-
-```bash
-export ANTICAPTCHA_API_KEY=your_api_key
-```
-
-### CapMonster
-
-```bash
-export CAPMONSTER_API_KEY=your_api_key
+# .env file (all optional)
+TWOCAPTCHA_API_KEY=your_key    # 2captcha.com
+ANTICAPTCHA_API_KEY=your_key   # anti-captcha.com
+CAPMONSTER_API_KEY=your_key    # capmonster.cloud
 ```
 
 ## 📊 API Endpoints

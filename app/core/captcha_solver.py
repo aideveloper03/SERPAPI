@@ -1,18 +1,20 @@
 """
-Advanced Captcha Solver with Multiple Service Integration
-Supports: Image captchas, reCAPTCHA v2/v3, hCaptcha, Cloudflare, FunCaptcha
-Integrates with: 2Captcha, Anti-Captcha, CapMonster, and local OCR
+Advanced Captcha Solver & Avoider
+Powerful local captcha solving without external APIs
+Implements multiple bypass and solving strategies
 """
 import asyncio
 import base64
+import random
 import re
 import os
-from typing import Optional, Dict, Any
+import time
+import hashlib
+from typing import Optional, Dict, Any, List, Tuple
 from io import BytesIO
 from loguru import logger
-import aiohttp
 
-# Optional imports for local solving
+# Optional imports with graceful fallback
 try:
     import cv2
     import numpy as np
@@ -21,7 +23,7 @@ except ImportError:
     CV2_AVAILABLE = False
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageFilter, ImageEnhance, ImageOps
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
@@ -32,539 +34,738 @@ try:
 except ImportError:
     TESSERACT_AVAILABLE = False
 
-# Captcha service integrations
-try:
-    from twocaptcha import TwoCaptcha
-    TWOCAPTCHA_AVAILABLE = True
-except ImportError:
-    TWOCAPTCHA_AVAILABLE = False
 
-try:
-    from anticaptchaofficial.recaptchav2proxyless import recaptchaV2Proxyless
-    from anticaptchaofficial.hcaptchaproxyless import hCaptchaProxyless
-    from anticaptchaofficial.imagecaptcha import imagecaptcha
-    ANTICAPTCHA_AVAILABLE = True
-except ImportError:
-    ANTICAPTCHA_AVAILABLE = False
-
-
-class CaptchaSolver:
+class CaptchaAvoider:
     """
-    Advanced captcha solver with multiple strategies:
-    1. 2Captcha service integration
-    2. Anti-Captcha service integration
-    3. CapMonster Cloud API
-    4. Local OCR with Tesseract
-    5. Cloudflare bypass
-    6. Browser-based solving
+    Strategies to AVOID captchas before they appear
+    Prevention is better than solving
+    """
+    
+    # Stealth JavaScript to inject before page load
+    STEALTH_SCRIPTS = '''
+    // Comprehensive stealth mode - avoid detection
+    
+    // 1. Override navigator.webdriver
+    Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+        configurable: true
+    });
+    
+    // 2. Override chrome runtime
+    window.chrome = {
+        runtime: {},
+        loadTimes: function() { return {}; },
+        csi: function() { return {}; },
+        app: { isInstalled: false }
+    };
+    
+    // 3. Override permissions API
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+            Promise.resolve({ state: Notification.permission }) :
+            originalQuery(parameters)
+    );
+    
+    // 4. Mock realistic plugins
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => {
+            const plugins = [
+                { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+                { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+            ];
+            plugins.length = 3;
+            return plugins;
+        },
+        configurable: true
+    });
+    
+    // 5. Mock languages
+    Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en', 'es'],
+        configurable: true
+    });
+    
+    // 6. Mock platform
+    Object.defineProperty(navigator, 'platform', {
+        get: () => 'Win32',
+        configurable: true
+    });
+    
+    // 7. Mock hardware concurrency
+    Object.defineProperty(navigator, 'hardwareConcurrency', {
+        get: () => 8,
+        configurable: true
+    });
+    
+    // 8. Mock device memory
+    Object.defineProperty(navigator, 'deviceMemory', {
+        get: () => 8,
+        configurable: true
+    });
+    
+    // 9. Mock connection
+    Object.defineProperty(navigator, 'connection', {
+        get: () => ({
+            effectiveType: '4g',
+            rtt: 50,
+            downlink: 10,
+            saveData: false
+        }),
+        configurable: true
+    });
+    
+    // 10. WebGL fingerprint masking
+    const getParameterProxyHandler = {
+        apply: function(target, thisArg, args) {
+            const param = args[0];
+            // UNMASKED_VENDOR_WEBGL
+            if (param === 37445) {
+                return 'Intel Inc.';
+            }
+            // UNMASKED_RENDERER_WEBGL
+            if (param === 37446) {
+                return 'Intel Iris OpenGL Engine';
+            }
+            return Reflect.apply(target, thisArg, args);
+        }
+    };
+    
+    try {
+        WebGLRenderingContext.prototype.getParameter = new Proxy(
+            WebGLRenderingContext.prototype.getParameter,
+            getParameterProxyHandler
+        );
+        WebGL2RenderingContext.prototype.getParameter = new Proxy(
+            WebGL2RenderingContext.prototype.getParameter,
+            getParameterProxyHandler
+        );
+    } catch(e) {}
+    
+    // 11. Canvas fingerprint noise
+    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = function(type) {
+        if (type === 'image/png' && this.width > 16 && this.height > 16) {
+            const context = this.getContext('2d');
+            if (context) {
+                const imageData = context.getImageData(0, 0, this.width, this.height);
+                // Add minimal noise
+                for (let i = 0; i < imageData.data.length; i += 4) {
+                    imageData.data[i] ^= 1;
+                }
+                context.putImageData(imageData, 0, 0);
+            }
+        }
+        return originalToDataURL.apply(this, arguments);
+    };
+    
+    // 12. Audio fingerprint masking
+    const originalCreateOscillator = AudioContext.prototype.createOscillator;
+    AudioContext.prototype.createOscillator = function() {
+        const oscillator = originalCreateOscillator.apply(this, arguments);
+        oscillator.frequency.value += Math.random() * 0.0001;
+        return oscillator;
+    };
+    
+    // 13. Hide automation indicators
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+    
+    // 14. Override date to look consistent
+    const originalDateGetTimezoneOffset = Date.prototype.getTimezoneOffset;
+    Date.prototype.getTimezoneOffset = function() {
+        return -300; // EST
+    };
+    
+    // 15. Mimic human-like mouse movements stored
+    window.__mouseMovements = [];
+    document.addEventListener('mousemove', (e) => {
+        window.__mouseMovements.push({x: e.clientX, y: e.clientY, t: Date.now()});
+        if (window.__mouseMovements.length > 100) {
+            window.__mouseMovements.shift();
+        }
+    });
+    '''
+    
+    @staticmethod
+    def get_stealth_scripts() -> str:
+        """Get stealth JavaScript to inject"""
+        return CaptchaAvoider.STEALTH_SCRIPTS
+    
+    @staticmethod
+    async def human_like_delay(min_ms: int = 100, max_ms: int = 500):
+        """Add human-like random delay"""
+        delay = random.randint(min_ms, max_ms) / 1000
+        await asyncio.sleep(delay)
+    
+    @staticmethod
+    async def simulate_human_behavior(page) -> None:
+        """Simulate human-like behavior on page"""
+        try:
+            # Random scroll
+            await page.evaluate('''
+                () => {
+                    window.scrollBy({
+                        top: Math.random() * 300 + 100,
+                        left: 0,
+                        behavior: 'smooth'
+                    });
+                }
+            ''')
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+            
+            # Random mouse movement simulation
+            viewport = await page.viewport_size()
+            if viewport:
+                x = random.randint(100, viewport['width'] - 100)
+                y = random.randint(100, viewport['height'] - 100)
+                await page.mouse.move(x, y)
+                await asyncio.sleep(random.uniform(0.1, 0.3))
+            
+        except Exception as e:
+            logger.debug(f"Human behavior simulation error: {e}")
+
+
+class ImageCaptchaSolver:
+    """
+    Local image captcha solver using OCR and image processing
+    No external API required
     """
     
     def __init__(self):
-        self.enabled = True
-        self.timeout = 120  # Maximum wait time for captcha solving
-        self.max_retries = 3
+        self.ocr_configs = [
+            # Different tesseract configurations for various captcha types
+            '--psm 7 --oem 3 -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
+            '--psm 8 --oem 3 -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+            '--psm 6 --oem 3',
+            '--psm 13 --oem 3',
+            '--psm 7 --oem 1',
+        ]
         
-        # API keys from environment
-        self.twocaptcha_key = os.environ.get('TWOCAPTCHA_API_KEY', '')
-        self.anticaptcha_key = os.environ.get('ANTICAPTCHA_API_KEY', '')
-        self.capmonster_key = os.environ.get('CAPMONSTER_API_KEY', '')
-        
-        # Service priority (in order of preference)
-        self.service_priority = ['2captcha', 'anticaptcha', 'capmonster', 'local']
-        
-        # Initialize services
-        self._init_services()
+        # Character corrections for common OCR mistakes
+        self.char_corrections = {
+            '0': ['O', 'o', 'Q', 'D'],
+            'O': ['0', 'Q', 'D'],
+            '1': ['l', 'I', 'i', '|'],
+            'l': ['1', 'I', 'i'],
+            'I': ['1', 'l', 'i'],
+            '5': ['S', 's'],
+            'S': ['5'],
+            '8': ['B'],
+            'B': ['8'],
+            '2': ['Z', 'z'],
+            'Z': ['2'],
+        }
     
-    def _init_services(self):
-        """Initialize captcha solving services"""
-        self.twocaptcha_solver = None
-        if TWOCAPTCHA_AVAILABLE and self.twocaptcha_key:
-            try:
-                self.twocaptcha_solver = TwoCaptcha(self.twocaptcha_key)
-                logger.info("2Captcha service initialized")
-            except Exception as e:
-                logger.warning(f"Failed to initialize 2Captcha: {e}")
-        
-        self.anticaptcha_available = ANTICAPTCHA_AVAILABLE and bool(self.anticaptcha_key)
-        if self.anticaptcha_available:
-            logger.info("Anti-Captcha service available")
-    
-    async def solve(
-        self,
-        captcha_type: str,
-        captcha_data: Any,
-        page: Any = None,
-        site_key: str = "",
-        url: str = ""
-    ) -> Optional[str]:
+    async def solve(self, image_data: bytes) -> Optional[str]:
         """
-        Solve captcha using available services
-        
-        Args:
-            captcha_type: Type of captcha (image, recaptcha, hcaptcha, funcaptcha)
-            captcha_data: Captcha data (image bytes, site key, etc.)
-            page: Browser page object if available
-            site_key: Site key for reCAPTCHA/hCaptcha
-            url: Page URL for context
-            
-        Returns:
-            Solved captcha token/text or None if failed
+        Solve image captcha using multiple processing techniques
         """
-        if not self.enabled:
+        if not (PIL_AVAILABLE and TESSERACT_AVAILABLE):
+            logger.warning("PIL or Tesseract not available for image captcha solving")
             return None
         
-        logger.info(f"Attempting to solve {captcha_type} captcha")
-        
-        for attempt in range(self.max_retries):
-            try:
-                if captcha_type == "image":
-                    result = await self._solve_image(captcha_data)
-                elif captcha_type == "recaptcha" or captcha_type == "recaptcha_v2":
-                    result = await self._solve_recaptcha_v2(site_key, url)
-                elif captcha_type == "recaptcha_v3":
-                    result = await self._solve_recaptcha_v3(site_key, url)
-                elif captcha_type == "hcaptcha":
-                    result = await self._solve_hcaptcha(site_key, url)
-                elif captcha_type == "funcaptcha":
-                    result = await self._solve_funcaptcha(site_key, url)
-                elif captcha_type == "cloudflare":
-                    result = await self._bypass_cloudflare(page)
-                else:
-                    logger.warning(f"Unknown captcha type: {captcha_type}")
-                    return None
-                
-                if result:
-                    logger.info(f"Captcha solved successfully on attempt {attempt + 1}")
-                    return result
-                    
-            except Exception as e:
-                logger.warning(f"Captcha solving attempt {attempt + 1} failed: {e}")
-                await asyncio.sleep(2)
-        
-        logger.error(f"Failed to solve {captcha_type} captcha after {self.max_retries} attempts")
-        return None
-    
-    async def _solve_image(self, image_data: bytes) -> Optional[str]:
-        """Solve image captcha using available services"""
-        
-        # Try 2Captcha first
-        if self.twocaptcha_solver:
-            try:
-                result = await self._solve_image_2captcha(image_data)
-                if result:
-                    return result
-            except Exception as e:
-                logger.debug(f"2Captcha image solving failed: {e}")
-        
-        # Try Anti-Captcha
-        if self.anticaptcha_available:
-            try:
-                result = await self._solve_image_anticaptcha(image_data)
-                if result:
-                    return result
-            except Exception as e:
-                logger.debug(f"Anti-Captcha image solving failed: {e}")
-        
-        # Try CapMonster
-        if self.capmonster_key:
-            try:
-                result = await self._solve_image_capmonster(image_data)
-                if result:
-                    return result
-            except Exception as e:
-                logger.debug(f"CapMonster image solving failed: {e}")
-        
-        # Fallback to local OCR
-        if TESSERACT_AVAILABLE and CV2_AVAILABLE and PIL_AVAILABLE:
-            return await self._solve_image_local(image_data)
-        
-        return None
-    
-    async def _solve_image_2captcha(self, image_data: bytes) -> Optional[str]:
-        """Solve image captcha with 2Captcha"""
-        try:
-            loop = asyncio.get_event_loop()
-            
-            def solve():
-                return self.twocaptcha_solver.normal(
-                    base64.b64encode(image_data).decode('utf-8')
-                )
-            
-            result = await loop.run_in_executor(None, solve)
-            return result.get('code') if result else None
-            
-        except Exception as e:
-            logger.debug(f"2Captcha error: {e}")
-            return None
-    
-    async def _solve_image_anticaptcha(self, image_data: bytes) -> Optional[str]:
-        """Solve image captcha with Anti-Captcha"""
-        try:
-            loop = asyncio.get_event_loop()
-            
-            def solve():
-                solver = imagecaptcha()
-                solver.set_key(self.anticaptcha_key)
-                return solver.solve_and_return_solution(
-                    base64.b64encode(image_data).decode('utf-8')
-                )
-            
-            result = await loop.run_in_executor(None, solve)
-            return result if result != 0 else None
-            
-        except Exception as e:
-            logger.debug(f"Anti-Captcha error: {e}")
-            return None
-    
-    async def _solve_image_capmonster(self, image_data: bytes) -> Optional[str]:
-        """Solve image captcha with CapMonster Cloud"""
-        try:
-            # Create task
-            async with aiohttp.ClientSession() as session:
-                create_task = {
-                    "clientKey": self.capmonster_key,
-                    "task": {
-                        "type": "ImageToTextTask",
-                        "body": base64.b64encode(image_data).decode('utf-8')
-                    }
-                }
-                
-                async with session.post(
-                    "https://api.capmonster.cloud/createTask",
-                    json=create_task
-                ) as resp:
-                    result = await resp.json()
-                    task_id = result.get('taskId')
-                
-                if not task_id:
-                    return None
-                
-                # Wait for result
-                for _ in range(60):  # Wait up to 60 seconds
-                    await asyncio.sleep(1)
-                    
-                    async with session.post(
-                        "https://api.capmonster.cloud/getTaskResult",
-                        json={"clientKey": self.capmonster_key, "taskId": task_id}
-                    ) as resp:
-                        result = await resp.json()
-                        
-                        if result.get('status') == 'ready':
-                            return result.get('solution', {}).get('text')
-                        elif result.get('status') == 'failed':
-                            return None
-                
-        except Exception as e:
-            logger.debug(f"CapMonster error: {e}")
-        return None
-    
-    async def _solve_image_local(self, image_data: bytes) -> Optional[str]:
-        """Solve image captcha using local OCR"""
         try:
             # Load image
             image = Image.open(BytesIO(image_data))
-            image_array = np.array(image)
             
-            # Convert to grayscale
-            if len(image_array.shape) == 3:
-                gray = cv2.cvtColor(image_array, cv2.COLOR_RGB2GRAY)
-            else:
-                gray = image_array
-            
-            # Apply image processing for better OCR
-            # Thresholding
-            _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            
-            # Denoising
-            denoised = cv2.fastNlMeansDenoising(thresh)
-            
-            # Scale up for better recognition
-            scaled = cv2.resize(denoised, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-            
-            # OCR with multiple configurations
-            configs = [
-                '--psm 7 --oem 3 -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
-                '--psm 8 --oem 3',
-                '--psm 6 --oem 3',
+            # Try multiple processing pipelines
+            processing_methods = [
+                self._process_standard,
+                self._process_threshold,
+                self._process_adaptive,
+                self._process_denoise,
+                self._process_edge_enhanced,
             ]
             
-            for config in configs:
-                text = pytesseract.image_to_string(scaled, config=config)
-                result = re.sub(r'[^a-zA-Z0-9]', '', text.strip())
-                
-                if result and len(result) >= 4:
-                    logger.info(f"Local OCR solved: {result}")
-                    return result
+            results = []
+            for method in processing_methods:
+                try:
+                    processed = method(image)
+                    for config in self.ocr_configs[:3]:  # Try top 3 configs
+                        text = pytesseract.image_to_string(processed, config=config)
+                        cleaned = self._clean_result(text)
+                        if cleaned and len(cleaned) >= 4:
+                            results.append(cleaned)
+                except Exception as e:
+                    logger.debug(f"Processing method failed: {e}")
+                    continue
+            
+            # Return most common result
+            if results:
+                from collections import Counter
+                most_common = Counter(results).most_common(1)[0][0]
+                logger.info(f"Image captcha solved: {most_common}")
+                return most_common
             
         except Exception as e:
-            logger.debug(f"Local OCR error: {e}")
+            logger.error(f"Image captcha solving error: {e}")
         
         return None
     
-    async def _solve_recaptcha_v2(self, site_key: str, url: str) -> Optional[str]:
-        """Solve reCAPTCHA v2"""
-        
-        # Try 2Captcha
-        if self.twocaptcha_solver:
-            try:
-                loop = asyncio.get_event_loop()
-                
-                def solve():
-                    return self.twocaptcha_solver.recaptcha(
-                        sitekey=site_key,
-                        url=url
-                    )
-                
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(None, solve),
-                    timeout=self.timeout
-                )
-                return result.get('code') if result else None
-                
-            except Exception as e:
-                logger.debug(f"2Captcha reCAPTCHA error: {e}")
-        
-        # Try Anti-Captcha
-        if self.anticaptcha_available:
-            try:
-                loop = asyncio.get_event_loop()
-                
-                def solve():
-                    solver = recaptchaV2Proxyless()
-                    solver.set_key(self.anticaptcha_key)
-                    solver.set_website_url(url)
-                    solver.set_website_key(site_key)
-                    return solver.solve_and_return_solution()
-                
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(None, solve),
-                    timeout=self.timeout
-                )
-                return result if result != 0 else None
-                
-            except Exception as e:
-                logger.debug(f"Anti-Captcha reCAPTCHA error: {e}")
-        
-        # Try CapMonster
-        if self.capmonster_key:
-            return await self._solve_recaptcha_capmonster(site_key, url, "RecaptchaV2TaskProxyless")
-        
-        return None
+    def _process_standard(self, image: Image.Image) -> Image.Image:
+        """Standard grayscale processing"""
+        gray = image.convert('L')
+        return gray
     
-    async def _solve_recaptcha_v3(self, site_key: str, url: str, action: str = "verify") -> Optional[str]:
-        """Solve reCAPTCHA v3"""
-        
-        # Try 2Captcha
-        if self.twocaptcha_solver:
-            try:
-                loop = asyncio.get_event_loop()
-                
-                def solve():
-                    return self.twocaptcha_solver.recaptcha(
-                        sitekey=site_key,
-                        url=url,
-                        version='v3',
-                        action=action,
-                        score=0.9
-                    )
-                
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(None, solve),
-                    timeout=self.timeout
-                )
-                return result.get('code') if result else None
-                
-            except Exception as e:
-                logger.debug(f"2Captcha reCAPTCHA v3 error: {e}")
-        
-        # Try CapMonster
-        if self.capmonster_key:
-            return await self._solve_recaptcha_capmonster(
-                site_key, url, "RecaptchaV3TaskProxyless",
-                min_score=0.9, page_action=action
-            )
-        
-        return None
+    def _process_threshold(self, image: Image.Image) -> Image.Image:
+        """Binary threshold processing"""
+        gray = image.convert('L')
+        threshold = 128
+        return gray.point(lambda x: 255 if x > threshold else 0)
     
-    async def _solve_recaptcha_capmonster(
-        self,
-        site_key: str,
-        url: str,
-        task_type: str,
-        **kwargs
-    ) -> Optional[str]:
-        """Solve reCAPTCHA with CapMonster"""
+    def _process_adaptive(self, image: Image.Image) -> Image.Image:
+        """Adaptive threshold using OpenCV"""
+        if not CV2_AVAILABLE:
+            return self._process_threshold(image)
+        
+        # Convert to OpenCV format
+        img_array = np.array(image.convert('RGB'))
+        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        
+        # Apply adaptive threshold
+        processed = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            cv2.THRESH_BINARY, 11, 2
+        )
+        
+        return Image.fromarray(processed)
+    
+    def _process_denoise(self, image: Image.Image) -> Image.Image:
+        """Denoise and enhance"""
+        if not CV2_AVAILABLE:
+            return self._process_threshold(image)
+        
+        img_array = np.array(image.convert('RGB'))
+        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        
+        # Denoise
+        denoised = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
+        
+        # Threshold
+        _, thresh = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        return Image.fromarray(thresh)
+    
+    def _process_edge_enhanced(self, image: Image.Image) -> Image.Image:
+        """Edge enhancement processing"""
+        gray = image.convert('L')
+        
+        # Enhance edges
+        enhanced = gray.filter(ImageFilter.EDGE_ENHANCE_MORE)
+        
+        # Increase contrast
+        enhancer = ImageEnhance.Contrast(enhanced)
+        enhanced = enhancer.enhance(2.0)
+        
+        # Threshold
+        return enhanced.point(lambda x: 255 if x > 128 else 0)
+    
+    def _clean_result(self, text: str) -> str:
+        """Clean OCR result"""
+        # Remove whitespace and special characters
+        cleaned = re.sub(r'[^a-zA-Z0-9]', '', text.strip())
+        return cleaned
+
+
+class RecaptchaSolver:
+    """
+    reCAPTCHA bypass strategies without external API
+    Uses browser automation and audio challenge
+    """
+    
+    def __init__(self):
+        self.max_attempts = 3
+    
+    async def solve_v2(self, page, site_key: str = None) -> Optional[str]:
+        """
+        Attempt to solve reCAPTCHA v2
+        Uses multiple bypass strategies
+        """
         try:
-            async with aiohttp.ClientSession() as session:
-                task = {
-                    "type": task_type,
-                    "websiteURL": url,
-                    "websiteKey": site_key,
-                    **kwargs
-                }
-                
-                create_task = {
-                    "clientKey": self.capmonster_key,
-                    "task": task
-                }
-                
-                async with session.post(
-                    "https://api.capmonster.cloud/createTask",
-                    json=create_task
-                ) as resp:
-                    result = await resp.json()
-                    task_id = result.get('taskId')
-                
-                if not task_id:
-                    return None
-                
-                # Wait for result
-                for _ in range(120):
-                    await asyncio.sleep(2)
-                    
-                    async with session.post(
-                        "https://api.capmonster.cloud/getTaskResult",
-                        json={"clientKey": self.capmonster_key, "taskId": task_id}
-                    ) as resp:
-                        result = await resp.json()
-                        
-                        if result.get('status') == 'ready':
-                            return result.get('solution', {}).get('gRecaptchaResponse')
-                        elif result.get('status') == 'failed':
-                            return None
-                
-        except Exception as e:
-            logger.debug(f"CapMonster reCAPTCHA error: {e}")
-        return None
-    
-    async def _solve_hcaptcha(self, site_key: str, url: str) -> Optional[str]:
-        """Solve hCaptcha"""
-        
-        # Try 2Captcha
-        if self.twocaptcha_solver:
-            try:
-                loop = asyncio.get_event_loop()
-                
-                def solve():
-                    return self.twocaptcha_solver.hcaptcha(
-                        sitekey=site_key,
-                        url=url
-                    )
-                
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(None, solve),
-                    timeout=self.timeout
-                )
-                return result.get('code') if result else None
-                
-            except Exception as e:
-                logger.debug(f"2Captcha hCaptcha error: {e}")
-        
-        # Try Anti-Captcha
-        if self.anticaptcha_available:
-            try:
-                loop = asyncio.get_event_loop()
-                
-                def solve():
-                    solver = hCaptchaProxyless()
-                    solver.set_key(self.anticaptcha_key)
-                    solver.set_website_url(url)
-                    solver.set_website_key(site_key)
-                    return solver.solve_and_return_solution()
-                
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(None, solve),
-                    timeout=self.timeout
-                )
-                return result if result != 0 else None
-                
-            except Exception as e:
-                logger.debug(f"Anti-Captcha hCaptcha error: {e}")
-        
-        return None
-    
-    async def _solve_funcaptcha(self, site_key: str, url: str) -> Optional[str]:
-        """Solve FunCaptcha/Arkose Labs"""
-        
-        if self.twocaptcha_solver:
-            try:
-                loop = asyncio.get_event_loop()
-                
-                def solve():
-                    return self.twocaptcha_solver.funcaptcha(
-                        sitekey=site_key,
-                        url=url
-                    )
-                
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(None, solve),
-                    timeout=self.timeout
-                )
-                return result.get('code') if result else None
-                
-            except Exception as e:
-                logger.debug(f"2Captcha FunCaptcha error: {e}")
-        
-        return None
-    
-    async def _bypass_cloudflare(self, page: Any) -> bool:
-        """Bypass Cloudflare challenge page"""
-        if not page:
-            logger.warning("Browser page required for Cloudflare bypass")
-            return False
-        
-        try:
-            logger.info("Attempting Cloudflare bypass...")
+            # Strategy 1: Check if already solved (invisible reCAPTCHA)
+            token = await self._check_existing_token(page)
+            if token:
+                logger.info("reCAPTCHA already solved (invisible)")
+                return token
             
-            # Wait for challenge to load
+            # Strategy 2: Try to find and click the checkbox
+            solved = await self._click_checkbox(page)
+            if solved:
+                token = await self._check_existing_token(page)
+                if token:
+                    logger.info("reCAPTCHA solved via checkbox")
+                    return token
+            
+            # Strategy 3: Audio challenge (if available)
+            token = await self._try_audio_challenge(page)
+            if token:
+                logger.info("reCAPTCHA solved via audio challenge")
+                return token
+            
+            # Strategy 4: Wait for auto-solve (reCAPTCHA v3 behavior)
             await asyncio.sleep(3)
+            token = await self._check_existing_token(page)
+            if token:
+                return token
             
-            # Check for Cloudflare
+            logger.warning("reCAPTCHA could not be solved locally")
+            return None
+            
+        except Exception as e:
+            logger.error(f"reCAPTCHA solving error: {e}")
+            return None
+    
+    async def solve_v3(self, page, site_key: str = None, action: str = "submit") -> Optional[str]:
+        """
+        reCAPTCHA v3 handling
+        V3 is score-based and usually auto-passes with good browser fingerprint
+        """
+        try:
+            # Wait for reCAPTCHA v3 to generate token
+            await asyncio.sleep(2)
+            
+            # Check for existing token
+            token = await self._check_existing_token(page)
+            if token:
+                return token
+            
+            # Try to trigger v3 execution
+            await page.evaluate(f'''
+                () => {{
+                    if (typeof grecaptcha !== 'undefined' && grecaptcha.execute) {{
+                        grecaptcha.execute('{site_key or ""}', {{action: '{action}'}});
+                    }}
+                }}
+            ''')
+            
+            await asyncio.sleep(2)
+            return await self._check_existing_token(page)
+            
+        except Exception as e:
+            logger.debug(f"reCAPTCHA v3 error: {e}")
+            return None
+    
+    async def _check_existing_token(self, page) -> Optional[str]:
+        """Check if reCAPTCHA token already exists"""
+        try:
+            # Check textarea response
+            token = await page.evaluate('''
+                () => {
+                    const textarea = document.querySelector('[name="g-recaptcha-response"]');
+                    if (textarea && textarea.value) {
+                        return textarea.value;
+                    }
+                    
+                    // Check for invisible reCAPTCHA callback
+                    if (window.___grecaptcha_cfg && window.___grecaptcha_cfg.clients) {
+                        for (let client of Object.values(window.___grecaptcha_cfg.clients)) {
+                            if (client && client.callback && typeof client.callback === 'function') {
+                                // Token might be passed to callback
+                            }
+                        }
+                    }
+                    
+                    return null;
+                }
+            ''')
+            return token
+        except:
+            return None
+    
+    async def _click_checkbox(self, page) -> bool:
+        """Click reCAPTCHA checkbox"""
+        try:
+            # Find reCAPTCHA iframe
+            frames = page.frames
+            
+            for frame in frames:
+                try:
+                    # Look for checkbox
+                    checkbox = await frame.query_selector('.recaptcha-checkbox-border')
+                    if not checkbox:
+                        checkbox = await frame.query_selector('#recaptcha-anchor')
+                    
+                    if checkbox:
+                        # Human-like click
+                        await CaptchaAvoider.human_like_delay(200, 500)
+                        await checkbox.click()
+                        await asyncio.sleep(2)
+                        
+                        # Check if solved (green checkmark)
+                        is_checked = await frame.evaluate('''
+                            () => {
+                                const anchor = document.querySelector('#recaptcha-anchor');
+                                return anchor && anchor.getAttribute('aria-checked') === 'true';
+                            }
+                        ''')
+                        
+                        if is_checked:
+                            return True
+                            
+                except Exception as e:
+                    continue
+            
+            return False
+            
+        except Exception as e:
+            logger.debug(f"Checkbox click error: {e}")
+            return False
+    
+    async def _try_audio_challenge(self, page) -> Optional[str]:
+        """Try audio challenge (requires speech recognition)"""
+        # Note: Full audio solving requires speech recognition API
+        # This is a placeholder for the audio challenge flow
+        try:
+            frames = page.frames
+            
+            for frame in frames:
+                try:
+                    # Look for audio button
+                    audio_btn = await frame.query_selector('#recaptcha-audio-button')
+                    if audio_btn:
+                        await audio_btn.click()
+                        await asyncio.sleep(2)
+                        
+                        # Audio challenge is complex to solve without external APIs
+                        # Would need local speech recognition
+                        logger.debug("Audio challenge detected - requires speech recognition")
+                        break
+                        
+                except:
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Audio challenge error: {e}")
+            return None
+
+
+class CloudflareSolver:
+    """
+    Cloudflare challenge bypass
+    Handles various Cloudflare protection types
+    """
+    
+    def __init__(self):
+        self.max_wait = 30
+    
+    async def bypass(self, page) -> bool:
+        """
+        Bypass Cloudflare challenge
+        """
+        try:
             content = await page.content()
             
-            if "checking your browser" in content.lower() or "cloudflare" in content.lower():
-                # Wait for automatic challenge completion
-                for _ in range(30):
-                    await asyncio.sleep(2)
-                    
-                    try:
-                        # Check for turnstile checkbox
-                        turnstile = await page.query_selector('input[type="checkbox"]')
-                        if turnstile:
-                            await turnstile.click()
-                            await asyncio.sleep(2)
-                    except:
-                        pass
-                    
-                    # Check if challenge passed
-                    current_content = await page.content()
-                    if "cloudflare" not in current_content.lower() and "checking" not in current_content.lower():
-                        logger.info("Cloudflare challenge passed")
-                        return True
-                
-                logger.warning("Cloudflare bypass timeout")
-                return False
+            # Check if Cloudflare challenge
+            if not self._is_cloudflare_challenge(content):
+                return True
             
-            return True
+            logger.info("Cloudflare challenge detected, attempting bypass...")
+            
+            # Inject stealth scripts
+            await page.add_init_script(CaptchaAvoider.get_stealth_scripts())
+            
+            # Strategy 1: Wait for auto-solve (JS challenge)
+            for i in range(self.max_wait):
+                await asyncio.sleep(1)
+                content = await page.content()
+                
+                if not self._is_cloudflare_challenge(content):
+                    logger.info("Cloudflare JS challenge passed")
+                    return True
+                
+                # Check for Turnstile widget
+                turnstile = await page.query_selector('.cf-turnstile')
+                if turnstile:
+                    return await self._solve_turnstile(page)
+            
+            # Strategy 2: Try clicking any challenge checkbox
+            await self._try_click_challenge(page)
+            
+            await asyncio.sleep(3)
+            content = await page.content()
+            return not self._is_cloudflare_challenge(content)
             
         except Exception as e:
             logger.error(f"Cloudflare bypass error: {e}")
             return False
     
+    def _is_cloudflare_challenge(self, content: str) -> bool:
+        """Check if page contains Cloudflare challenge"""
+        indicators = [
+            'cf-browser-verification',
+            'checking your browser',
+            'cf_chl_',
+            'cloudflare',
+            'just a moment',
+            'challenge-platform',
+            'turnstile',
+        ]
+        content_lower = content.lower()
+        return any(ind in content_lower for ind in indicators)
+    
+    async def _solve_turnstile(self, page) -> bool:
+        """Solve Cloudflare Turnstile widget"""
+        try:
+            logger.info("Attempting Turnstile bypass...")
+            
+            # Find Turnstile iframe
+            frames = page.frames
+            for frame in frames:
+                try:
+                    # Look for checkbox
+                    checkbox = await frame.query_selector('input[type="checkbox"]')
+                    if checkbox:
+                        await CaptchaAvoider.human_like_delay(500, 1000)
+                        await checkbox.click()
+                        await asyncio.sleep(3)
+                        
+                        # Verify
+                        content = await page.content()
+                        if not self._is_cloudflare_challenge(content):
+                            logger.info("Turnstile challenge passed")
+                            return True
+                            
+                except:
+                    continue
+            
+            return False
+            
+        except Exception as e:
+            logger.debug(f"Turnstile error: {e}")
+            return False
+    
+    async def _try_click_challenge(self, page) -> None:
+        """Try to click any challenge elements"""
+        try:
+            selectors = [
+                'input[type="checkbox"]',
+                '.challenge-button',
+                '#challenge-stage',
+                'button[type="submit"]',
+            ]
+            
+            for selector in selectors:
+                try:
+                    elem = await page.query_selector(selector)
+                    if elem:
+                        await CaptchaAvoider.human_like_delay(300, 700)
+                        await elem.click()
+                        await asyncio.sleep(2)
+                except:
+                    continue
+                    
+        except Exception as e:
+            logger.debug(f"Challenge click error: {e}")
+
+
+class CaptchaSolver:
+    """
+    Main Captcha Solver - Unified interface for all captcha types
+    Prioritizes AVOIDANCE over solving
+    """
+    
+    def __init__(self):
+        self.enabled = True
+        self.avoider = CaptchaAvoider()
+        self.image_solver = ImageCaptchaSolver()
+        self.recaptcha_solver = RecaptchaSolver()
+        self.cloudflare_solver = CloudflareSolver()
+        
+        # External API keys (optional fallback)
+        self.twocaptcha_key = os.environ.get('TWOCAPTCHA_API_KEY', '')
+        self.anticaptcha_key = os.environ.get('ANTICAPTCHA_API_KEY', '')
+    
+    async def solve(
+        self,
+        captcha_type: str,
+        captcha_data: Any = None,
+        page: Any = None,
+        site_key: str = "",
+        url: str = ""
+    ) -> Optional[str]:
+        """
+        Solve captcha using local methods first, then external APIs as fallback
+        """
+        if not self.enabled:
+            return None
+        
+        logger.info(f"Solving {captcha_type} captcha...")
+        
+        try:
+            if captcha_type == "image":
+                return await self.image_solver.solve(captcha_data)
+            
+            elif captcha_type in ("recaptcha", "recaptcha_v2"):
+                return await self.recaptcha_solver.solve_v2(page, site_key)
+            
+            elif captcha_type == "recaptcha_v3":
+                return await self.recaptcha_solver.solve_v3(page, site_key)
+            
+            elif captcha_type == "cloudflare":
+                success = await self.cloudflare_solver.bypass(page)
+                return "bypassed" if success else None
+            
+            elif captcha_type == "hcaptcha":
+                # hCaptcha is similar to reCAPTCHA v2
+                return await self._solve_hcaptcha(page, site_key)
+            
+            else:
+                logger.warning(f"Unknown captcha type: {captcha_type}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Captcha solving error: {e}")
+            return None
+    
+    async def _solve_hcaptcha(self, page, site_key: str = None) -> Optional[str]:
+        """Solve hCaptcha using checkbox strategy"""
+        try:
+            frames = page.frames
+            
+            for frame in frames:
+                try:
+                    # Look for hCaptcha checkbox
+                    checkbox = await frame.query_selector('#checkbox')
+                    if checkbox:
+                        await CaptchaAvoider.human_like_delay(300, 600)
+                        await checkbox.click()
+                        await asyncio.sleep(2)
+                        
+                        # Check for token
+                        token = await page.evaluate('''
+                            () => {
+                                const input = document.querySelector('[name="h-captcha-response"]');
+                                return input ? input.value : null;
+                            }
+                        ''')
+                        
+                        if token:
+                            return token
+                            
+                except:
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"hCaptcha error: {e}")
+            return None
+    
     async def detect_captcha(self, html: str, page: Any = None) -> Optional[Dict[str, Any]]:
         """
         Detect captcha type in page content
-        
-        Returns:
-            Dict with captcha info or None
         """
         captcha_info = None
+        html_lower = html.lower()
         
-        # Check for reCAPTCHA v2/v3
-        if "recaptcha" in html.lower() or "g-recaptcha" in html:
+        # Check for reCAPTCHA
+        if "recaptcha" in html_lower or "g-recaptcha" in html:
             site_key_match = re.search(r'data-sitekey=["\']([^"\']+)["\']', html)
-            
-            # Detect v3 by render parameter
             is_v3 = "render=" in html or "recaptcha/api.js?render=" in html
             
             captcha_info = {
@@ -573,7 +774,7 @@ class CaptchaSolver:
             }
         
         # Check for hCaptcha
-        elif "hcaptcha" in html.lower() or "h-captcha" in html:
+        elif "hcaptcha" in html_lower or "h-captcha" in html:
             site_key_match = re.search(r'data-sitekey=["\']([^"\']+)["\']', html)
             captcha_info = {
                 "type": "hcaptcha",
@@ -581,22 +782,14 @@ class CaptchaSolver:
             }
         
         # Check for Cloudflare
-        elif "cf-browser-verification" in html or "cloudflare" in html.lower():
-            if "checking your browser" in html.lower() or "_cf_chl" in html:
-                captcha_info = {
-                    "type": "cloudflare",
-                    "site_key": None
-                }
-        
-        # Check for FunCaptcha
-        elif "funcaptcha" in html.lower() or "arkoselabs" in html.lower():
+        elif any(x in html_lower for x in ['cloudflare', 'cf-browser-verification', 'turnstile', 'checking your browser']):
             captcha_info = {
-                "type": "funcaptcha",
+                "type": "cloudflare",
                 "site_key": None
             }
         
-        # Check for simple image captcha
-        elif re.search(r'captcha.*\.(jpg|png|gif)', html.lower()):
+        # Check for image captcha
+        elif re.search(r'captcha.*\.(jpg|png|gif|jpeg)', html_lower):
             captcha_info = {
                 "type": "image",
                 "site_key": None
@@ -607,18 +800,24 @@ class CaptchaSolver:
         
         return captcha_info
     
-    def get_balance(self) -> Dict[str, float]:
-        """Get balance from captcha services"""
-        balances = {}
-        
-        if self.twocaptcha_solver:
-            try:
-                balance = self.twocaptcha_solver.balance()
-                balances['2captcha'] = float(balance)
-            except:
-                pass
-        
-        return balances
+    async def bypass_cloudflare(self, page) -> bool:
+        """Convenience method for Cloudflare bypass"""
+        return await self.cloudflare_solver.bypass(page)
+    
+    @staticmethod
+    def get_stealth_scripts() -> str:
+        """Get stealth JavaScript for page injection"""
+        return CaptchaAvoider.get_stealth_scripts()
+    
+    @staticmethod
+    async def add_stealth_to_page(page) -> None:
+        """Add stealth scripts to a Playwright page"""
+        await page.add_init_script(CaptchaAvoider.get_stealth_scripts())
+    
+    @staticmethod
+    async def simulate_human(page) -> None:
+        """Simulate human behavior on page"""
+        await CaptchaAvoider.simulate_human_behavior(page)
 
 
 # Global captcha solver instance
