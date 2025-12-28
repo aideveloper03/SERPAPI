@@ -6,8 +6,70 @@ import os
 from typing import Optional, List, Dict, Any, Union
 from pathlib import Path
 import yaml
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, BeforeValidator
 from pydantic_settings import BaseSettings
+from typing_extensions import Annotated
+
+
+def parse_float(v: Any) -> float:
+    """Parse a value to float, handling strings from environment variables"""
+    if v is None:
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        v = v.strip()
+        if not v:
+            return 0.0
+        try:
+            return float(v)
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def parse_int(v: Any) -> int:
+    """Parse a value to int, handling strings and floats from environment variables"""
+    if v is None:
+        return 0
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        return int(v)
+    if isinstance(v, str):
+        v = v.strip()
+        if not v:
+            return 0
+        try:
+            # Handle float strings like "0.5" by converting to float first
+            return int(float(v))
+        except ValueError:
+            return 0
+    return 0
+
+
+def parse_bool(v: Any) -> bool:
+    """Parse a value to bool, handling strings from environment variables"""
+    if v is None:
+        return False
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    if isinstance(v, str):
+        v = v.strip().lower()
+        if v in ('true', '1', 'yes', 'on', 'enabled'):
+            return True
+        if v in ('false', '0', 'no', 'off', 'disabled', ''):
+            return False
+        return False
+    return False
+
+
+# Annotated types for proper validation
+FlexibleFloat = Annotated[float, BeforeValidator(parse_float)]
+FlexibleInt = Annotated[int, BeforeValidator(parse_int)]
+FlexibleBool = Annotated[bool, BeforeValidator(parse_bool)]
 
 
 class Settings(BaseSettings):
@@ -15,90 +77,88 @@ class Settings(BaseSettings):
     
     # API Configuration
     api_host: str = Field(default="0.0.0.0")
-    api_port: int = Field(default=8000)
-    api_workers: int = Field(default=4)
-    debug: bool = Field(default=False)
+    api_port: FlexibleInt = Field(default=8000)
+    api_workers: FlexibleInt = Field(default=4)
+    debug: FlexibleBool = Field(default=False)
     
     # Rate Limiting (optimized for 50+ requests/minute)
-    max_search_requests_per_minute: int = Field(default=100)
-    max_website_requests_per_minute: int = Field(default=60)
-    max_concurrent_requests: int = Field(default=100)
+    max_search_requests_per_minute: FlexibleInt = Field(default=100)
+    max_website_requests_per_minute: FlexibleInt = Field(default=60)
+    max_concurrent_requests: FlexibleInt = Field(default=100)
     
     # Redis Configuration
     redis_host: str = Field(default="localhost")
-    redis_port: int = Field(default=6379)
-    redis_db: int = Field(default=0)
+    redis_port: FlexibleInt = Field(default=6379)
+    redis_db: FlexibleInt = Field(default=0)
     redis_password: Optional[str] = Field(default=None)
     
     # Proxy Configuration
-    use_proxy: bool = Field(default=True)
-    proxy_rotation: bool = Field(default=True)
-    proxy_timeout: int = Field(default=15)
-    auto_fetch_proxies: bool = Field(default=True)
+    use_proxy: FlexibleBool = Field(default=True)
+    proxy_rotation: FlexibleBool = Field(default=True)
+    proxy_timeout: FlexibleInt = Field(default=15)
+    auto_fetch_proxies: FlexibleBool = Field(default=True)
     
     # Captcha Solving (optional API keys)
-    enable_captcha_solver: bool = Field(default=True)
-    captcha_timeout: int = Field(default=120)
+    enable_captcha_solver: FlexibleBool = Field(default=True)
+    captcha_timeout: FlexibleInt = Field(default=120)
     twocaptcha_api_key: Optional[str] = Field(default=None)
     anticaptcha_api_key: Optional[str] = Field(default=None)
     capmonster_api_key: Optional[str] = Field(default=None)
     
     # Request Configuration (optimized for speed)
-    request_timeout: int = Field(default=15)
-    max_retries: int = Field(default=2)
-    retry_delay: float = Field(default=0.5)
-    
-    @field_validator('retry_delay', mode='before')
-    @classmethod
-    def parse_retry_delay(cls, v: Any) -> float:
-        """Parse retry_delay from string or number"""
-        if isinstance(v, (int, float)):
-            return float(v)
-        if isinstance(v, str):
-            try:
-                return float(v)
-            except ValueError:
-                return 0.5
-        return 0.5
+    request_timeout: FlexibleInt = Field(default=15)
+    max_retries: FlexibleInt = Field(default=2)
+    retry_delay: FlexibleFloat = Field(default=0.5)
     
     # Scraping Configuration
-    javascript_rendering: bool = Field(default=True)
-    browser_headless: bool = Field(default=True)
-    page_load_timeout: int = Field(default=15)
+    javascript_rendering: FlexibleBool = Field(default=True)
+    browser_headless: FlexibleBool = Field(default=True)
+    page_load_timeout: FlexibleInt = Field(default=15)
     
     # Search Configuration
     default_search_engine: str = Field(default="google")
-    enable_fallback: bool = Field(default=True)
-    cache_results: bool = Field(default=True)
-    cache_ttl: int = Field(default=300)  # 5 minutes
+    enable_fallback: FlexibleBool = Field(default=True)
+    cache_results: FlexibleBool = Field(default=True)
+    cache_ttl: FlexibleInt = Field(default=300)  # 5 minutes
     
     # Logging
     log_level: str = Field(default="INFO")
     log_file: str = Field(default="logs/scraper.log")
     
     # Captcha avoidance settings
-    captcha_avoidance_enabled: bool = Field(default=True)
-    use_stealth_mode: bool = Field(default=True)
-    randomize_request_timing: bool = Field(default=True)
-    min_request_delay: float = Field(default=0.5)
-    max_request_delay: float = Field(default=2.0)
-    
-    # Paths
-    base_dir: Path = Path(__file__).resolve().parent.parent.parent
-    config_dir: Path = base_dir / "config"
-    logs_dir: Path = base_dir / "logs"
+    captcha_avoidance_enabled: FlexibleBool = Field(default=True)
+    use_stealth_mode: FlexibleBool = Field(default=True)
+    randomize_request_timing: FlexibleBool = Field(default=True)
+    min_request_delay: FlexibleFloat = Field(default=0.5)
+    max_request_delay: FlexibleFloat = Field(default=2.0)
     
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
         "extra": "ignore",
         "env_prefix": "",
+        "arbitrary_types_allowed": True,
     }
+    
+    @property
+    def base_dir(self) -> Path:
+        """Base directory of the project"""
+        return Path(__file__).resolve().parent.parent.parent
+    
+    @property
+    def config_dir(self) -> Path:
+        """Configuration directory"""
+        return self.base_dir / "config"
+    
+    @property
+    def logs_dir(self) -> Path:
+        """Logs directory"""
+        logs_path = self.base_dir / "logs"
+        logs_path.mkdir(exist_ok=True)
+        return logs_path
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # Ensure directories exist
-        self.logs_dir.mkdir(exist_ok=True)
         
         # Set captcha API keys as environment variables
         if self.twocaptcha_api_key:
