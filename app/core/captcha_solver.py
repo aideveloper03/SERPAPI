@@ -11,8 +11,6 @@ Key Features:
 5. reCAPTCHA v3 token generation through stealth browser
 6. Fallback to external APIs if configured
 """
-from __future__ import annotations
-
 import asyncio
 import base64
 import re
@@ -22,14 +20,11 @@ import time
 import hashlib
 import json
 import tempfile
-from typing import Optional, Dict, Any, List, Tuple, TYPE_CHECKING
+from typing import Optional, Dict, Any, List, Tuple
 from io import BytesIO
 from pathlib import Path
 from dataclasses import dataclass
 from loguru import logger
-
-if TYPE_CHECKING:
-    from PIL import Image as PILImage
 
 # Core imports
 import aiohttp
@@ -49,10 +44,6 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
-    Image = None  # Stub when PIL is not available
-    ImageFilter = None
-    ImageEnhance = None
-    ImageOps = None
     logger.debug("PIL not available - pip install pillow")
 
 try:
@@ -301,7 +292,7 @@ class ImageCaptchaSolver:
                 time_taken=time.time() - start_time
             )
     
-    async def _preprocess_image(self, image: Any) -> List[Any]:
+    async def _preprocess_image(self, image: Image.Image) -> List[Image.Image]:
         """Apply multiple preprocessing strategies"""
         processed = []
         

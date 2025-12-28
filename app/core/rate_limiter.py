@@ -4,7 +4,7 @@ Uses token bucket algorithm with Redis backend
 """
 import time
 import asyncio
-from typing import Optional, Any
+from typing import Optional
 from loguru import logger
 
 try:
@@ -25,7 +25,7 @@ class RateLimiter:
     def __init__(self, requests_per_minute: int, name: str = "default"):
         self.requests_per_minute = requests_per_minute
         self.name = name
-        self.redis_client: Optional[Any] = None
+        self.redis_client: Optional[any] = None
         self.use_redis = REDIS_AVAILABLE
         
         # In-memory fallback
