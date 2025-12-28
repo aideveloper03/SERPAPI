@@ -140,14 +140,21 @@ class YahooScraper:
             # Limit to requested number
             all_results = all_results[:num_results]
             
-            return {
-                'success': len(all_results) > 0,
+            has_results = len(all_results) > 0
+            
+            response = {
+                'success': has_results,
                 'query': query,
                 'search_type': search_type,
                 'engine': 'yahoo',
                 'total_results': len(all_results),
                 'results': all_results
             }
+            
+            if not has_results:
+                response['error'] = 'No results found - Yahoo may have changed its layout or request was blocked'
+            
+            return response
             
         except Exception as e:
             logger.error(f"Yahoo search error: {str(e)}")
@@ -157,6 +164,7 @@ class YahooScraper:
                 'query': query,
                 'search_type': search_type,
                 'engine': 'yahoo',
+                'total_results': 0,
                 'results': []
             }
     

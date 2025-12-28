@@ -120,9 +120,11 @@ class AlternativeScraper:
             return {
                 'success': False,
                 'error': str(e),
+                'error_type': 'unknown_error',
                 'query': query,
                 'search_type': search_type,
                 'engine': 'alternative',
+                'total_results': 0,
                 'results': []
             }
     
@@ -188,7 +190,9 @@ class AlternativeScraper:
                                 'engine_sources': item.get('engines', [])
                             })
                         
-                        if results:
+                        has_results = len(results) > 0
+                        
+                        if has_results:
                             return {
                                 'success': True,
                                 'query': query,
@@ -310,8 +314,10 @@ class AlternativeScraper:
                             'source': 'brave'
                         })
                 
-                return {
-                    'success': len(results) > 0,
+                has_results = len(results) > 0
+                
+                response = {
+                    'success': has_results,
                     'query': query,
                     'search_type': search_type,
                     'engine': 'alternative',
@@ -319,14 +325,21 @@ class AlternativeScraper:
                     'total_results': len(results),
                     'results': results
                 }
+                
+                if not has_results:
+                    response['error'] = 'No results from Brave Search API'
+                
+                return response
             
             return {
                 'success': False,
                 'error': 'Brave API request failed',
+                'error_type': 'api_request_failed',
                 'query': query,
                 'search_type': search_type,
                 'engine': 'alternative',
                 'method': 'brave',
+                'total_results': 0,
                 'results': []
             }
             
@@ -335,10 +348,12 @@ class AlternativeScraper:
             return {
                 'success': False,
                 'error': str(e),
+                'error_type': 'exception',
                 'query': query,
                 'search_type': search_type,
                 'engine': 'alternative',
                 'method': 'brave',
+                'total_results': 0,
                 'results': []
             }
     
