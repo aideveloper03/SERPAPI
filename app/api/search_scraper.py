@@ -16,6 +16,8 @@ from app.scrapers import (
     DuckDuckGoInstantAnswer,
     BingScraper,
     YahooScraper,
+    AlternativeScraper,
+    alternative_scraper,
 )
 
 
@@ -99,6 +101,85 @@ class SearchResponse(BaseModel):
     total_results: int
     results: List[dict]
     error: Optional[str] = None
+    error_type: Optional[str] = None  # captcha, blocked, selector_mismatch, rate_limited, timeout
+
+
+# Error types for descriptive error messages
+class SearchErrorType:
+    CAPTCHA = "captcha_detected"
+    BLOCKED = "blocked"
+    SELECTOR_MISMATCH = "selector_mismatch"
+    RATE_LIMITED = "rate_limited"
+    TIMEOUT = "timeout"
+    NO_RESULTS = "no_results"
+    ENGINE_UNAVAILABLE = "engine_unavailable"
+    UNKNOWN = "unknown_error"
+
+
+def determine_error_type(error_message: str, results_count: int) -> tuple[str, str]:
+    """
+    Determine the error type from error message or result state
+    Returns tuple of (error_type, descriptive_message)
+    """
+    if error_message:
+        error_lower = error_message.lower()
+        if any(word in error_lower for word in ['captcha', 'verify', 'robot']):
+            return SearchErrorType.CAPTCHA, "Captcha detected - search engine requires verification"
+        elif any(word in error_lower for word in ['block', 'denied', 'forbidden', '403']):
+            return SearchErrorType.BLOCKED, "Request blocked by search engine anti-bot protection"
+        elif any(word in error_lower for word in ['rate', 'limit', '429', 'too many']):
+            return SearchErrorType.RATE_LIMITED, "Rate limited - too many requests, please wait"
+        elif any(word in error_lower for word in ['timeout', 'timed out']):
+            return SearchErrorType.TIMEOUT, "Request timed out - search engine took too long to respond"
+        elif any(word in error_lower for word in ['selector', 'parse', 'extract']):
+            return SearchErrorType.SELECTOR_MISMATCH, "Selector mismatch - search engine layout may have changed"
+        elif 'unavailable' in error_lower or 'failed' in error_lower:
+            return SearchErrorType.ENGINE_UNAVAILABLE, error_message
+    
+    if results_count == 0:
+        return SearchErrorType.NO_RESULTS, "No results found - search may have returned empty or selectors may be outdated"
+    
+    return SearchErrorType.UNKNOWN, error_message or "Unknown error occurred"
+
+
+def create_search_response(
+    result: dict,
+    query: str,
+    search_type: str,
+    default_engine: str = "unknown"
+) -> SearchResponse:
+    """
+    Create a SearchResponse with proper success/error handling
+    Ensures success=False when results list is empty
+    """
+    results = result.get('results', [])
+    total_results = result.get('total_results', len(results))
+    engine = result.get('engine', default_engine)
+    method = result.get('method', 'unknown')
+    original_error = result.get('error')
+    
+    # CRITICAL: success should be False if no results
+    has_results = len(results) > 0
+    success = has_results and result.get('success', False)
+    
+    # Determine error type and message if not successful
+    error_type = None
+    error_message = None
+    
+    if not success:
+        error_type, error_message = determine_error_type(original_error, len(results))
+    
+    return SearchResponse(
+        success=success,
+        query=result.get('query', query),
+        search_type=result.get('search_type', search_type),
+        engine=engine,
+        method=method,
+        total_results=total_results,
+        results=results,
+        error=error_message,
+        error_type=error_type
+    )
 
 
 # Unified Search Engine
@@ -106,6 +187,7 @@ class SearchResponse(BaseModel):
 class UnifiedSearchEngine:
     """
     Unified search engine with automatic fallback between search engines
+    Includes alternative scraper as last resort when all primary engines fail
     """
     
     def __init__(self):
@@ -115,6 +197,8 @@ class UnifiedSearchEngine:
             'bing': BingScraper(),
             'yahoo': YahooScraper(),
         }
+        # Alternative scraper is tried as last resort if enabled
+        self.alternative_scraper = alternative_scraper
     
     async def search(
         self,
@@ -208,10 +292,27 @@ class UnifiedSearchEngine:
                 if not enable_fallback:
                     break
         
-        # All engines failed
+        # All primary engines failed - try alternative scraper as last resort
+        if self.alternative_scraper.is_available():
+            logger.info("All primary engines failed, trying alternative scraper...")
+            try:
+                result = await self.alternative_scraper.search(
+                    query=query,
+                    search_type=search_type,
+                    num_results=num_results,
+                    language=language
+                )
+                if result.get('success') and result.get('results'):
+                    logger.info(f"Alternative scraper returned {len(result['results'])} results")
+                    return result
+            except Exception as e:
+                logger.error(f"Alternative scraper error: {e}")
+        
+        # All engines failed including alternative
         return {
             'success': False,
-            'error': last_error or 'All search engines failed',
+            'error': last_error or 'All search engines failed (including alternative)',
+            'error_type': SearchErrorType.ENGINE_UNAVAILABLE,
             'query': query,
             'search_type': search_type,
             'engine': 'none',
@@ -225,30 +326,59 @@ class UnifiedSearchEngine:
         search_type: str = "all",
         num_results: int = 10,
         language: str = "en",
-        country: str = "us"
+        country: str = "us",
+        per_engine_timeout: float = 30.0
     ) -> dict:
         """
         Search all engines concurrently and combine results
+        Each engine has its own timeout so one failing engine doesn't hang the entire request
         """
-        tasks = []
         
+        async def search_with_timeout(engine_name: str, scraper, timeout: float):
+            """Execute search with per-engine timeout"""
+            try:
+                if engine_name == 'google':
+                    coro = scraper.search(
+                        query=query, search_type=search_type,
+                        num_results=num_results, language=language, country=country
+                    )
+                elif engine_name == 'duckduckgo':
+                    coro = scraper.search(
+                        query=query, search_type=search_type,
+                        num_results=num_results, region=f"{country}-{language}"
+                    )
+                else:
+                    coro = scraper.search(
+                        query=query, search_type=search_type,
+                        num_results=num_results, language=language, country=country
+                    )
+                
+                return await asyncio.wait_for(coro, timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.warning(f"Engine {engine_name} timed out after {timeout}s")
+                return {
+                    'success': False,
+                    'error': f'Engine timed out after {timeout}s',
+                    'query': query,
+                    'search_type': search_type,
+                    'engine': engine_name,
+                    'results': []
+                }
+            except Exception as e:
+                logger.error(f"Engine {engine_name} error: {e}")
+                return {
+                    'success': False,
+                    'error': str(e),
+                    'query': query,
+                    'search_type': search_type,
+                    'engine': engine_name,
+                    'results': []
+                }
+        
+        # Create tasks with individual timeouts
+        tasks = []
         for engine_name, scraper in self.scrapers.items():
-            if engine_name == 'google':
-                task = scraper.search(
-                    query=query, search_type=search_type,
-                    num_results=num_results, language=language, country=country
-                )
-            elif engine_name == 'duckduckgo':
-                task = scraper.search(
-                    query=query, search_type=search_type,
-                    num_results=num_results, region=f"{country}-{language}"
-                )
-            else:
-                task = scraper.search(
-                    query=query, search_type=search_type,
-                    num_results=num_results, language=language, country=country
-                )
-            tasks.append((engine_name, task))
+            tasks.append((engine_name, search_with_timeout(engine_name, scraper, per_engine_timeout)))
         
         # Execute all searches concurrently
         results_list = await asyncio.gather(
@@ -263,7 +393,9 @@ class UnifiedSearchEngine:
             'search_type': search_type,
             'engines': {},
             'all_results': [],
-            'total_results': 0
+            'total_results': 0,
+            'engines_succeeded': 0,
+            'engines_failed': 0
         }
         
         seen_urls = set()
@@ -275,13 +407,20 @@ class UnifiedSearchEngine:
                 combined_results['engines'][engine_name] = {
                     'success': False,
                     'error': str(result),
-                    'results': []
+                    'error_type': 'exception',
+                    'results': [],
+                    'total_results': 0
                 }
+                combined_results['engines_failed'] += 1
             else:
+                # Check if results are actually present
+                has_results = result.get('results') and len(result.get('results', [])) > 0
+                result['success'] = has_results  # Override success based on actual results
                 combined_results['engines'][engine_name] = result
                 
-                if result.get('success') and result.get('results'):
+                if has_results:
                     combined_results['success'] = True
+                    combined_results['engines_succeeded'] += 1
                     
                     # Add unique results
                     for r in result['results']:
@@ -290,8 +429,15 @@ class UnifiedSearchEngine:
                             seen_urls.add(url)
                             r['_engine'] = engine_name
                             combined_results['all_results'].append(r)
+                else:
+                    combined_results['engines_failed'] += 1
         
         combined_results['total_results'] = len(combined_results['all_results'])
+        
+        # Add error message if no results from any engine
+        if not combined_results['success']:
+            combined_results['error'] = "No results from any search engine"
+            combined_results['error_type'] = SearchErrorType.NO_RESULTS
         
         return combined_results
 
@@ -303,12 +449,15 @@ unified_engine = UnifiedSearchEngine()
 # API Endpoints
 
 @router.post("/unified", response_model=SearchResponse)
+@router.post("/search", response_model=SearchResponse)  # Canonical endpoint
 async def unified_search(request: UnifiedSearchRequest):
     """
-    Unified search with automatic fallback between search engines
+    Unified search with automatic fallback between search engines (RECOMMENDED)
     
     Tries engines in order until one succeeds. If Google fails, automatically
     tries DuckDuckGo, Bing, and Yahoo.
+    
+    NOTE: This is the recommended endpoint. Use /api/v1/search/search or /api/v1/search/unified
     
     Example:
     ```json
@@ -336,15 +485,11 @@ async def unified_search(request: UnifiedSearchRequest):
             fast_mode=request.fast_mode
         )
         
-        return SearchResponse(
-            success=result.get('success', False),
-            query=result.get('query', request.query),
-            search_type=result.get('search_type', request.search_type),
-            engine=result.get('engine', 'unknown'),
-            method=result.get('method', 'unknown'),
-            total_results=result.get('total_results', 0),
-            results=result.get('results', []),
-            error=result.get('error')
+        return create_search_response(
+            result=result,
+            query=request.query,
+            search_type=request.search_type,
+            default_engine='unified'
         )
         
     except Exception as e:
@@ -352,12 +497,39 @@ async def unified_search(request: UnifiedSearchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class AllEnginesSearchRequest(BaseModel):
+    """All-engines search request with timeout option"""
+    query: str = Field(..., description="Search query", min_length=1, max_length=500)
+    search_type: str = Field(default="all", description="Type of search: all, news, images, videos")
+    num_results: int = Field(default=10, ge=1, le=100)
+    language: str = Field(default="en")
+    country: str = Field(default="us")
+    per_engine_timeout: float = Field(
+        default=30.0,
+        description="Timeout per engine in seconds (prevents one slow engine from blocking all)",
+        ge=5.0,
+        le=120.0
+    )
+
+
 @router.post("/all-engines")
-async def search_all_engines(request: SearchRequest):
+@router.post("/multi")  # Alias for clarity
+async def search_all_engines(request: AllEnginesSearchRequest):
     """
     Search all engines concurrently and return combined results
     
     Returns results from all engines with duplicates removed.
+    Each engine has its own timeout so one failing engine doesn't hang the entire request.
+    
+    Example:
+    ```json
+    {
+        "query": "python programming",
+        "search_type": "all",
+        "num_results": 10,
+        "per_engine_timeout": 30.0
+    }
+    ```
     """
     try:
         logger.info(f"All-engines search: {request.query}")
@@ -367,7 +539,8 @@ async def search_all_engines(request: SearchRequest):
             search_type=request.search_type,
             num_results=request.num_results,
             language=request.language,
-            country=request.country
+            country=request.country,
+            per_engine_timeout=request.per_engine_timeout
         )
         
         return result
@@ -396,9 +569,9 @@ async def google_search(request: SearchRequest):
             country=request.country
         )
         
-        # If Google fails and fallback is enabled, try other engines
-        if not result.get('success') and settings.enable_fallback:
-            logger.info("Google failed, trying fallback engines...")
+        # If Google fails (no results or explicit failure) and fallback is enabled, try other engines
+        if (not result.get('success') or len(result.get('results', [])) == 0) and settings.enable_fallback:
+            logger.info("Google failed or returned no results, trying fallback engines...")
             result = await unified_engine.search(
                 query=request.query,
                 search_type=request.search_type,
@@ -408,15 +581,11 @@ async def google_search(request: SearchRequest):
                 engines=['duckduckgo', 'bing', 'yahoo']
             )
         
-        return SearchResponse(
-            success=result.get('success', False),
-            query=result.get('query', request.query),
-            search_type=result.get('search_type', request.search_type),
-            engine=result.get('engine', 'google'),
-            method=result.get('method', 'unknown'),
-            total_results=result.get('total_results', 0),
-            results=result.get('results', []),
-            error=result.get('error')
+        return create_search_response(
+            result=result,
+            query=request.query,
+            search_type=request.search_type,
+            default_engine='google'
         )
         
     except Exception as e:
@@ -443,15 +612,11 @@ async def duckduckgo_search(request: SearchRequest):
             safe_search=request.safe_search
         )
         
-        return SearchResponse(
-            success=result.get('success', False),
-            query=result.get('query', request.query),
-            search_type=result.get('search_type', request.search_type),
-            engine='duckduckgo',
-            method=result.get('method', 'library'),
-            total_results=result.get('total_results', 0),
-            results=result.get('results', []),
-            error=result.get('error')
+        return create_search_response(
+            result=result,
+            query=request.query,
+            search_type=request.search_type,
+            default_engine='duckduckgo'
         )
         
     except Exception as e:
@@ -477,15 +642,11 @@ async def bing_search(request: SearchRequest):
             safe_search=request.safe_search
         )
         
-        return SearchResponse(
-            success=result.get('success', False),
-            query=result.get('query', request.query),
-            search_type=result.get('search_type', request.search_type),
-            engine='bing',
-            method='direct',
-            total_results=result.get('total_results', 0),
-            results=result.get('results', []),
-            error=result.get('error')
+        return create_search_response(
+            result=result,
+            query=request.query,
+            search_type=request.search_type,
+            default_engine='bing'
         )
         
     except Exception as e:
@@ -510,15 +671,11 @@ async def yahoo_search(request: SearchRequest):
             country=request.country
         )
         
-        return SearchResponse(
-            success=result.get('success', False),
-            query=result.get('query', request.query),
-            search_type=result.get('search_type', request.search_type),
-            engine='yahoo',
-            method='direct',
-            total_results=result.get('total_results', 0),
-            results=result.get('results', []),
-            error=result.get('error')
+        return create_search_response(
+            result=result,
+            query=request.query,
+            search_type=request.search_type,
+            default_engine='yahoo'
         )
         
     except Exception as e:

@@ -13,6 +13,7 @@ from loguru import logger
 from app.core.request_handler import request_handler
 from app.core.rate_limiter import search_rate_limiter
 from app.utils.helpers import clean_text, sanitize_url
+from app.utils.user_agents import UserAgentRotator
 
 
 class YahooScraper:
@@ -27,6 +28,31 @@ class YahooScraper:
         self.videos_url = "https://video.search.yahoo.com/search/video"
         self.results_per_page = 10
         self.max_pages = 5
+        self.ua_rotator = UserAgentRotator()
+        
+        # Web result selectors with fallbacks
+        self.web_result_selectors = [
+            'div.dd.algo',
+            'li.algo',
+            'div.algo-sr',
+            'div[data-uuid]',
+            'ol.searchCenterMiddle li',
+            'div.Sr',
+        ]
+        
+        self.title_selectors = [
+            'h3.title a',
+            'h3 a',
+            'a.ac-algo',
+            'a[href]',
+        ]
+        
+        self.snippet_selectors = [
+            'p.s-desc',
+            'div.compText',
+            'p.lh-16',
+            'p',
+        ]
         
     async def search(
         self,
@@ -163,8 +189,11 @@ class YahooScraper:
         return params
     
     def _get_yahoo_headers(self) -> Dict[str, str]:
-        """Get Yahoo-specific headers"""
+        """Get Yahoo-specific headers with rotated User-Agent"""
+        ua = self.ua_rotator.get_random()  # Yahoo works with various browsers
+        
         return {
+            'User-Agent': ua,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
             'Accept-Encoding': 'gzip, deflate, br',
@@ -191,73 +220,86 @@ class YahooScraper:
         return []
     
     def _parse_web_results(self, html: str) -> List[Dict[str, Any]]:
-        """Parse web search results"""
+        """Parse web search results with improved selectors"""
         soup = BeautifulSoup(html, 'lxml')
         results = []
+        seen_urls = set()
+        working_selector = None
         
-        # Main result containers - multiple selectors for reliability
-        selectors = [
-            'div.dd.algo',
-            'li.algo',
-            'div.algo-sr',
-            'div[data-uuid]',
-        ]
-        
-        result_items = []
-        for selector in selectors:
+        # Try each selector
+        for selector in self.web_result_selectors:
             result_items = soup.select(selector)
-            if result_items:
+            
+            for item in result_items:
+                try:
+                    # Skip ads
+                    item_classes = ' '.join(item.get('class', []))
+                    if any(ad in item_classes.lower() for ad in ['ads', 'ad-', 'sponsor', 'commercial']):
+                        continue
+                    
+                    # Skip if data-ad attribute exists
+                    if item.get('data-ad'):
+                        continue
+                    
+                    # Title and URL - try multiple selectors
+                    title = ""
+                    url = ""
+                    for title_sel in self.title_selectors:
+                        title_elem = item.select_one(title_sel)
+                        if title_elem:
+                            title = clean_text(title_elem.get_text())
+                            url = title_elem.get('href', '')
+                            if title and len(title) > 3:
+                                break
+                    
+                    if not title or len(title) < 3:
+                        continue
+                    
+                    # Clean Yahoo redirect URL
+                    url = self._clean_url(url)
+                    
+                    if not url or not url.startswith('http') or url in seen_urls:
+                        continue
+                    
+                    seen_urls.add(url)
+                    
+                    # Snippet - try multiple selectors
+                    snippet = ""
+                    for snippet_sel in self.snippet_selectors:
+                        snippet_elem = item.select_one(snippet_sel)
+                        if snippet_elem:
+                            snippet = clean_text(snippet_elem.get_text())
+                            if snippet and len(snippet) > 20 and snippet != title:
+                                break
+                    
+                    # Displayed URL
+                    cite_elem = item.select_one('span.fc-green') or item.select_one('span.fz-ms') or item.select_one('cite')
+                    displayed_url = clean_text(cite_elem.get_text()) if cite_elem else url
+                    
+                    results.append({
+                        'title': title,
+                        'url': url,
+                        'snippet': snippet,
+                        'displayed_url': displayed_url,
+                        'source': 'yahoo'
+                    })
+                    
+                    if not working_selector:
+                        working_selector = selector
+                    
+                except Exception as e:
+                    logger.debug(f"Error parsing Yahoo result: {e}")
+                    continue
+            
+            # If we found results with this selector, stop trying others
+            if results:
                 break
         
-        for item in result_items:
-            try:
-                # Skip ads
-                if 'ads' in ' '.join(item.get('class', [])).lower():
-                    continue
-                
-                # Title and URL
-                title_elem = (
-                    item.select_one('h3.title a') or
-                    item.select_one('h3 a') or
-                    item.select_one('a.ac-algo')
-                )
-                
-                if not title_elem:
-                    continue
-                
-                title = clean_text(title_elem.get_text())
-                url = title_elem.get('href', '')
-                
-                # Clean Yahoo redirect URL
-                url = self._clean_url(url)
-                
-                if not url or not url.startswith('http'):
-                    continue
-                
-                # Snippet
-                snippet_elem = (
-                    item.select_one('p.s-desc') or
-                    item.select_one('div.compText') or
-                    item.select_one('p')
-                )
-                snippet = clean_text(snippet_elem.get_text()) if snippet_elem else ""
-                
-                # Displayed URL
-                cite_elem = item.select_one('span.fc-green') or item.select_one('span.fz-ms')
-                displayed_url = clean_text(cite_elem.get_text()) if cite_elem else url
-                
-                results.append({
-                    'title': title,
-                    'url': url,
-                    'snippet': snippet,
-                    'displayed_url': displayed_url,
-                    'source': 'yahoo'
-                })
-                
-            except Exception as e:
-                logger.debug(f"Error parsing Yahoo result: {e}")
-                continue
-        
+        if working_selector:
+            logger.debug(f"Parsed {len(results)} Yahoo results using selector: {working_selector}")
+        else:
+            logger.debug(f"Parsed {len(results)} Yahoo results (no working selector found)")
+            
         return results
     
     def _parse_news_results(self, html: str) -> List[Dict[str, Any]]:
