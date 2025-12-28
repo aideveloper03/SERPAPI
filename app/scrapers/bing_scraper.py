@@ -13,6 +13,7 @@ from loguru import logger
 from app.core.request_handler import request_handler
 from app.core.rate_limiter import search_rate_limiter
 from app.utils.helpers import clean_text, sanitize_url
+from app.utils.user_agents import UserAgentRotator
 
 
 class BingScraper:
@@ -27,6 +28,29 @@ class BingScraper:
         self.videos_url = "https://www.bing.com/videos/search"
         self.results_per_page = 10
         self.max_pages = 5
+        self.ua_rotator = UserAgentRotator()
+        
+        # Web result selectors with fallbacks
+        self.web_result_selectors = [
+            'li.b_algo',
+            'div.b_algo',
+            'ol#b_results > li.b_algo',
+            'ol#b_results > li',
+            'div#b_results li.b_algo',
+        ]
+        
+        self.title_selectors = [
+            'h2 a',
+            'h2',
+            'a',
+        ]
+        
+        self.snippet_selectors = [
+            'div.b_caption p',
+            'p.b_paractl',
+            'div.b_caption',
+            'p',
+        ]
         
     async def search(
         self,
@@ -157,8 +181,11 @@ class BingScraper:
         return params
     
     def _get_bing_headers(self) -> Dict[str, str]:
-        """Get Bing-specific headers"""
+        """Get Bing-specific headers with rotated User-Agent"""
+        ua = self.ua_rotator.get_random()  # Bing works well with various browsers
+        
         return {
+            'User-Agent': ua,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
             'Accept-Encoding': 'gzip, deflate, br',
@@ -185,57 +212,78 @@ class BingScraper:
         return []
     
     def _parse_web_results(self, html: str) -> List[Dict[str, Any]]:
-        """Parse web search results"""
+        """Parse web search results with improved selectors"""
         soup = BeautifulSoup(html, 'lxml')
         results = []
+        seen_urls = set()
+        working_selector = None
         
-        # Main result containers - multiple selectors for reliability
-        selectors = [
-            'li.b_algo',
-            'div.b_algo',
-            'ol#b_results > li',
-        ]
-        
-        result_items = []
-        for selector in selectors:
+        # Try each selector
+        for selector in self.web_result_selectors:
             result_items = soup.select(selector)
-            if result_items:
-                break
-        
-        for item in result_items:
-            try:
-                # Skip ads and non-organic results
-                if 'b_ad' in item.get('class', []):
-                    continue
-                
-                # Title and URL
-                title_elem = item.select_one('h2 a') or item.select_one('a')
-                if not title_elem:
-                    continue
-                
-                title = clean_text(title_elem.get_text())
-                url = title_elem.get('href', '')
-                
-                # Skip internal Bing links
-                if not url or 'bing.com' in url or url.startswith('/'):
-                    continue
-                
-                # Clean tracking from URL
-                url = self._clean_url(url)
-                
-                # Snippet
-                snippet_elem = (
-                    item.select_one('div.b_caption p') or
-                    item.select_one('p.b_paractl') or
-                    item.select_one('p')
-                )
-                snippet = clean_text(snippet_elem.get_text()) if snippet_elem else ""
-                
-                # Displayed URL
-                cite_elem = item.select_one('div.b_attribution cite')
-                displayed_url = clean_text(cite_elem.get_text()) if cite_elem else url
-                
-                if title and url.startswith('http'):
+            
+            for item in result_items:
+                try:
+                    # Skip ads and non-organic results
+                    item_classes = ' '.join(item.get('class', []))
+                    if any(ad in item_classes.lower() for ad in ['b_ad', 'ad_', 'ads', 'sponsor']):
+                        continue
+                    
+                    # Skip if data-ad attribute exists
+                    if item.get('data-ad'):
+                        continue
+                    
+                    # Title and URL - try multiple selectors
+                    title = ""
+                    url = ""
+                    for title_sel in self.title_selectors:
+                        title_elem = item.select_one(title_sel)
+                        if title_elem:
+                            title = clean_text(title_elem.get_text())
+                            if title_elem.name == 'a':
+                                url = title_elem.get('href', '')
+                            else:
+                                link_elem = title_elem.select_one('a') if title_elem.name != 'a' else title_elem
+                                if link_elem:
+                                    url = link_elem.get('href', '')
+                            if title and len(title) > 3:
+                                break
+                    
+                    if not title or len(title) < 3:
+                        continue
+                    
+                    # If no URL yet, find link separately
+                    if not url:
+                        link_elem = item.select_one('a[href]')
+                        if link_elem:
+                            url = link_elem.get('href', '')
+                    
+                    # Skip internal Bing links
+                    if not url or 'bing.com' in url or url.startswith('/'):
+                        continue
+                    
+                    # Clean tracking from URL
+                    url = self._clean_url(url)
+                    
+                    # Skip if already seen or invalid
+                    if not url.startswith('http') or url in seen_urls:
+                        continue
+                    
+                    seen_urls.add(url)
+                    
+                    # Snippet - try multiple selectors
+                    snippet = ""
+                    for snippet_sel in self.snippet_selectors:
+                        snippet_elem = item.select_one(snippet_sel)
+                        if snippet_elem:
+                            snippet = clean_text(snippet_elem.get_text())
+                            if snippet and len(snippet) > 20 and snippet != title:
+                                break
+                    
+                    # Displayed URL
+                    cite_elem = item.select_one('div.b_attribution cite') or item.select_one('cite')
+                    displayed_url = clean_text(cite_elem.get_text()) if cite_elem else url
+                    
                     results.append({
                         'title': title,
                         'url': url,
@@ -244,10 +292,22 @@ class BingScraper:
                         'source': 'bing'
                     })
                     
-            except Exception as e:
-                logger.debug(f"Error parsing Bing result: {e}")
-                continue
+                    if not working_selector:
+                        working_selector = selector
+                        
+                except Exception as e:
+                    logger.debug(f"Error parsing Bing result: {e}")
+                    continue
+            
+            # If we found results with this selector, stop trying others
+            if results:
+                break
         
+        if working_selector:
+            logger.debug(f"Parsed {len(results)} Bing results using selector: {working_selector}")
+        else:
+            logger.debug(f"Parsed {len(results)} Bing results (no working selector found)")
+            
         return results
     
     def _parse_news_results(self, html: str) -> List[Dict[str, Any]]:

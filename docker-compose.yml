@@ -12,12 +12,19 @@ services:
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     networks:
       - scraper-network
     restart: unless-stopped
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 1s
+        max_attempts: 5
+        window: 30s
 
   # Web Scraping API - Main Service
   api:
@@ -95,8 +102,21 @@ services:
     
     restart: unless-stopped
     
-    # Resource limits for production
+    # Healthcheck for faster recovery
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    
+    # Resource limits for production with faster restart
     deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 1s
+        max_attempts: 10
+        window: 60s
       resources:
         limits:
           cpus: '4'
@@ -131,6 +151,19 @@ services:
       - scraper-network
     profiles:
       - dev
+    # Faster healthcheck for development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 1s
+        max_attempts: 5
+        window: 30s
 
   # Nginx reverse proxy (optional, for production)
   nginx:

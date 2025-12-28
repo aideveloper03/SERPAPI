@@ -109,30 +109,50 @@ class DuckDuckGoScraper:
             safesearch = safesearch_map.get(safe_search, 'moderate')
             
             results = []
+            error_message = None
             
-            if search_type == "all":
-                results = await loop.run_in_executor(
-                    None,
-                    lambda: self._ddgs_text_search(query, region, safesearch, num_results)
-                )
-            elif search_type == "news":
-                results = await loop.run_in_executor(
-                    None,
-                    lambda: self._ddgs_news_search(query, region, safesearch, num_results)
-                )
-            elif search_type == "images":
-                results = await loop.run_in_executor(
-                    None,
-                    lambda: self._ddgs_image_search(query, region, safesearch, num_results)
-                )
-            elif search_type == "videos":
-                results = await loop.run_in_executor(
-                    None,
-                    lambda: self._ddgs_video_search(query, region, safesearch, num_results)
-                )
+            try:
+                if search_type == "all":
+                    results = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None,
+                            lambda: self._ddgs_text_search(query, region, safesearch, num_results)
+                        ),
+                        timeout=30.0  # 30 second timeout per search
+                    )
+                elif search_type == "news":
+                    results = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None,
+                            lambda: self._ddgs_news_search(query, region, safesearch, num_results)
+                        ),
+                        timeout=30.0
+                    )
+                elif search_type == "images":
+                    results = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None,
+                            lambda: self._ddgs_image_search(query, region, safesearch, num_results)
+                        ),
+                        timeout=30.0
+                    )
+                elif search_type == "videos":
+                    results = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None,
+                            lambda: self._ddgs_video_search(query, region, safesearch, num_results)
+                        ),
+                        timeout=30.0
+                    )
+            except asyncio.TimeoutError:
+                error_message = "Search timed out after 30 seconds"
+                logger.warning(f"DuckDuckGo {search_type} search timeout")
             
-            return {
-                'success': len(results) > 0,
+            # Determine success and error
+            has_results = len(results) > 0
+            
+            response = {
+                'success': has_results,
                 'query': query,
                 'search_type': search_type,
                 'engine': 'duckduckgo',
@@ -141,11 +161,28 @@ class DuckDuckGoScraper:
                 'results': results
             }
             
+            if not has_results:
+                response['error'] = error_message or 'No results found from DuckDuckGo'
+            
+            return response
+            
         except Exception as e:
-            logger.error(f"DuckDuckGo library search error: {e}")
+            error_str = str(e).lower()
+            
+            # Categorize the error
+            if 'rate' in error_str or '429' in error_str:
+                error_type = 'Rate limited by DuckDuckGo'
+            elif 'timeout' in error_str:
+                error_type = 'Request timed out'
+            elif 'blocked' in error_str:
+                error_type = 'Blocked by DuckDuckGo'
+            else:
+                error_type = str(e)
+            
+            logger.error(f"DuckDuckGo library search error: {error_type}")
             return {
                 'success': False,
-                'error': str(e),
+                'error': error_type,
                 'query': query,
                 'search_type': search_type,
                 'engine': 'duckduckgo',
@@ -164,21 +201,33 @@ class DuckDuckGoScraper:
         results = []
         try:
             with DDGS() as ddgs:
-                for r in ddgs.text(
+                search_results = list(ddgs.text(
                     query,
                     region=region,
                     safesearch=safesearch,
                     max_results=num_results
-                ):
-                    results.append({
-                        'title': r.get('title', ''),
-                        'url': r.get('href', r.get('link', '')),
-                        'snippet': r.get('body', r.get('snippet', '')),
-                        'displayed_url': r.get('href', r.get('link', '')),
-                        'source': 'duckduckgo'
-                    })
+                ))
+                
+                for r in search_results:
+                    url = r.get('href', r.get('link', ''))
+                    if url:  # Only add if we have a valid URL
+                        results.append({
+                            'title': r.get('title', ''),
+                            'url': url,
+                            'snippet': r.get('body', r.get('snippet', '')),
+                            'displayed_url': url,
+                            'source': 'duckduckgo'
+                        })
+                        
+            logger.debug(f"DDGS text search returned {len(results)} results")
         except Exception as e:
-            logger.debug(f"DDGS text search error: {e}")
+            error_str = str(e).lower()
+            if 'rate' in error_str or 'limit' in error_str:
+                logger.warning(f"DDGS text search rate limited: {e}")
+            elif 'timeout' in error_str:
+                logger.warning(f"DDGS text search timeout: {e}")
+            else:
+                logger.debug(f"DDGS text search error: {e}")
         return results
     
     def _ddgs_news_search(

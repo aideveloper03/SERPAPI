@@ -197,7 +197,18 @@ async def root():
             "Batch processing",
             "OSINT capabilities"
         ],
-        "search_types": ["all", "news", "images", "videos"]
+        "search_types": ["all", "news", "images", "videos"],
+        "alternative_search": {
+            "description": "Alternative search providers available when primary engines are blocked",
+            "enabled": "Set ALTERNATIVE_SEARCH_ENABLED=true to enable",
+            "providers": ["searxng", "brave"],
+            "config": {
+                "ALTERNATIVE_SEARCH_ENABLED": "true/false",
+                "ALTERNATIVE_SEARCH_PROVIDER": "searxng or brave",
+                "ALTERNATIVE_SEARCH_URL": "Base URL for provider",
+                "ALTERNATIVE_SEARCH_API_KEY": "API key if required (Brave)"
+            }
+        }
     }
 
 

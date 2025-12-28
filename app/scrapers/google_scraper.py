@@ -14,6 +14,7 @@ from loguru import logger
 from app.core.request_handler import request_handler
 from app.core.rate_limiter import search_rate_limiter
 from app.utils.helpers import clean_text, sanitize_url
+from app.utils.user_agents import UserAgentRotator
 
 # Import alternative search libraries as fallback
 try:
@@ -40,30 +41,49 @@ class GoogleScraper:
         self.mobile_url = "https://www.google.com/search"
         self.results_per_page = 10
         self.max_pages = 5
+        self.ua_rotator = UserAgentRotator()
         
-        # Updated selectors for 2024/2025 Google layout
+        # Updated selectors for 2024/2025 Google layout with more fallbacks
         self.web_result_selectors = [
-            'div.g:not(.g-blk)',  # Main results
+            'div.g:not(.g-blk):not([data-ad-client])',  # Main results, exclude ads
+            'div.g',  # Basic result container
             'div[data-hveid] > div.g',
+            'div.Gx5Zad.fP1Qef.xpd.EtOod.pkphOe',  # Newer layout
             'div.Gx5Zad',
             'div.tF2Cxc',
             'div[data-sokoban-container]',
             'div.N54PNb',  # New layout
+            'div.MjjYud',  # 2024 layout
+            'div[data-content-feature="1"]',  # Content feature results
+            'div.hlcw0c',  # Another variant
         ]
         
         self.title_selectors = [
+            'h3.LC20lb',  # Most common title class
             'h3',
+            'div[role="heading"] h3',
             'div[role="heading"]',
             'a h3',
+            'a[data-ved] h3',
         ]
         
         self.snippet_selectors = [
-            'div.VwiC3b',
+            'div.VwiC3b',  # Most common snippet class
+            'div[data-sncf="1"]',  # Data attribute variant
+            'div[data-sncf="2"]',
             'span.aCOpRe',
             'div[data-sncf]',
             'div.s',
             'span.st',
             'div.ITZIwc',  # New layout
+            'div.lEBKkf',  # Another variant
+            'span.qXLe6d',  # Inline snippet
+        ]
+        
+        self.link_selectors = [
+            'a[href]:not([href^="#"]):not([href^="javascript"])',
+            'a[data-ved]',
+            'a.sVXRqc',
         ]
     
     async def search(
@@ -243,9 +263,10 @@ class GoogleScraper:
             
             url = f"{self.mobile_url}?{urlencode(params)}"
             
-            # Mobile user agent
+            # Mobile user agent - use rotated mobile UA
+            mobile_ua = self.ua_rotator.get_random_mobile()
             mobile_headers = {
-                'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+                'User-Agent': mobile_ua,
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Accept-Language': f'{language};q=0.9,en;q=0.8',
                 'Accept-Encoding': 'gzip, deflate, br',
@@ -413,8 +434,17 @@ class GoogleScraper:
         return params
     
     def _get_google_headers(self) -> Dict[str, str]:
-        """Get Google-specific headers"""
+        """Get Google-specific headers with rotated User-Agent"""
+        ua = self.ua_rotator.get_chrome()  # Use Chrome UA for best compatibility
+        
+        # Extract Chrome version from UA for consistent Sec-Ch-Ua
+        chrome_version = "122"  # Default
+        version_match = re.search(r'Chrome/(\d+)', ua)
+        if version_match:
+            chrome_version = version_match.group(1)
+        
         return {
+            'User-Agent': ua,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate, br',
@@ -425,7 +455,7 @@ class GoogleScraper:
             'Sec-Fetch-Mode': 'navigate',
             'Sec-Fetch-Site': 'none',
             'Sec-Fetch-User': '?1',
-            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua': f'"Not_A Brand";v="8", "Chromium";v="{chrome_version}", "Google Chrome";v="{chrome_version}"',
             'Sec-Ch-Ua-Mobile': '?0',
             'Sec-Ch-Ua-Platform': '"Windows"',
             'Cache-Control': 'max-age=0',
@@ -463,6 +493,9 @@ class GoogleScraper:
         results = []
         seen_urls = set()
         
+        # Track which selectors work for debugging
+        working_selector = None
+        
         # Try each selector
         for selector in self.web_result_selectors:
             result_divs = soup.select(selector)
@@ -473,23 +506,44 @@ class GoogleScraper:
                     if not div.get_text(strip=True):
                         continue
                     
-                    # Extract title
+                    # Skip ads
+                    div_classes = ' '.join(div.get('class', []))
+                    if any(ad_indicator in div_classes.lower() for ad_indicator in ['ad', 'sponsor', 'commercial']):
+                        continue
+                    
+                    # Check for ad data attributes
+                    if div.get('data-ad-client') or div.get('data-text-ad'):
+                        continue
+                    
+                    # Extract title - try multiple selectors
                     title = ""
                     for title_sel in self.title_selectors:
                         title_elem = div.select_one(title_sel)
                         if title_elem:
                             title = clean_text(title_elem.get_text())
-                            break
+                            if title and len(title) > 3:  # Minimum viable title
+                                break
                     
-                    if not title:
+                    if not title or len(title) < 3:
                         continue
                     
-                    # Extract URL
-                    link_elem = div.select_one('a[href]')
-                    if not link_elem:
-                        continue
+                    # Extract URL - try multiple link selectors
+                    url = None
+                    for link_sel in self.link_selectors:
+                        link_elem = div.select_one(link_sel)
+                        if link_elem:
+                            url = link_elem.get('href', '')
+                            if url and url.startswith('http'):
+                                break
                     
-                    url = link_elem.get('href', '')
+                    if not url:
+                        # Fallback: find any anchor tag
+                        link_elem = div.select_one('a[href]')
+                        if link_elem:
+                            url = link_elem.get('href', '')
+                    
+                    if not url:
+                        continue
                     
                     # Clean Google redirect URLs
                     url = self._clean_google_url(url)
@@ -499,18 +553,30 @@ class GoogleScraper:
                         continue
                     
                     # Skip Google internal links
-                    if 'google.com' in url and '/search' in url:
-                        continue
+                    if 'google.com' in url:
+                        if any(path in url for path in ['/search', '/url', '/imgres', '/maps', '/support']):
+                            continue
                     
                     seen_urls.add(url)
                     
-                    # Extract snippet
+                    # Extract snippet - try multiple selectors
                     snippet = ""
                     for snippet_sel in self.snippet_selectors:
                         snippet_elem = div.select_one(snippet_sel)
                         if snippet_elem:
                             snippet = clean_text(snippet_elem.get_text())
-                            break
+                            if snippet and len(snippet) > 20:  # Meaningful snippet
+                                break
+                    
+                    # Fallback: get first paragraph or div text
+                    if not snippet:
+                        for fallback_tag in ['p', 'span', 'div']:
+                            text_elem = div.select_one(fallback_tag)
+                            if text_elem and text_elem != title:
+                                potential_snippet = clean_text(text_elem.get_text())
+                                if potential_snippet and len(potential_snippet) > 30 and potential_snippet != title:
+                                    snippet = potential_snippet[:500]  # Limit length
+                                    break
                     
                     # Extract displayed URL
                     cite_elem = div.select_one('cite')
@@ -524,6 +590,9 @@ class GoogleScraper:
                         'source': 'google'
                     })
                     
+                    if not working_selector:
+                        working_selector = selector
+                    
                 except Exception as e:
                     logger.debug(f"Error parsing result: {e}")
                     continue
@@ -532,7 +601,11 @@ class GoogleScraper:
             if results:
                 break
         
-        logger.debug(f"Parsed {len(results)} web results")
+        if working_selector:
+            logger.debug(f"Parsed {len(results)} web results using selector: {working_selector}")
+        else:
+            logger.debug(f"Parsed {len(results)} web results (no working selector found)")
+            
         return results
     
     def _parse_news_results(self, html: str) -> List[Dict[str, Any]]:
