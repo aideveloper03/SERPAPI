@@ -385,8 +385,6 @@ class RequestHandler:
         if not CURL_CFFI_AVAILABLE:
             return RequestResult(success=False, error="curl_cffi not available", strategy="curl_cffi")
         
-        proxy_url = None  # Initialize before try block to avoid UnboundLocalError
-        
         try:
             # Select random browser impersonation
             impersonate = random.choice(self.browser_impersonations)
@@ -459,8 +457,6 @@ class RequestHandler:
         """
         Strategy 2: Optimized aiohttp with advanced headers
         """
-        proxy_url = None  # Initialize before try block to avoid UnboundLocalError
-        
         try:
             # Get proxy
             proxy_config = await proxy_manager.get_proxy()
@@ -514,7 +510,7 @@ class RequestHandler:
                 )
                 
         except Exception as e:
-            if proxy_url:
+            if 'proxy_url' in locals() and proxy_url:
                 await proxy_manager.mark_proxy_failed(proxy_url)
             return RequestResult(
                 success=False,
@@ -542,8 +538,6 @@ class RequestHandler:
         """
         if not HTTPX_AVAILABLE:
             return RequestResult(success=False, error="httpx not available", strategy="httpx")
-        
-        proxy_url = None  # Initialize before try block to avoid UnboundLocalError
         
         try:
             # Get proxy
@@ -588,8 +582,6 @@ class RequestHandler:
                 )
                 
         except Exception as e:
-            if proxy_url:
-                await proxy_manager.mark_proxy_failed(proxy_url)
             return RequestResult(
                 success=False,
                 error=str(e),
