@@ -1,129 +1,297 @@
-# 🚀 Quick Start Guide
+# Quick Start Guide
 
-Get the search scraping system running in under 5 minutes.
+Get up and running with the Web Scraping System in 5 minutes.
 
-## Option 1: Docker (Easiest)
+## 🚀 Fastest Setup (Docker)
 
 ```bash
-# Start everything
+# 1. Clone and enter directory
+git clone <repository-url>
+cd web-scraping-system
+
+# 2. Start with Docker Compose
 docker-compose up -d
 
-# Test it works
-curl -X POST http://localhost:8000/api/v1/search/fast \
-  -H "Content-Type: application/json" \
-  -d '{"query": "python programming", "num_results": 5}'
+# 3. Check status
+curl http://localhost:8000/health
 
-# View API documentation
-open http://localhost:8000/docs
+# 4. Open documentation
+# Visit: http://localhost:8000/docs
 ```
 
-## Option 2: Local Python
+**Done!** The API is now running at `http://localhost:8000`
+
+## 🐍 Python Setup (Alternative)
 
 ```bash
-# 1. Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+# 1. Clone repository
+git clone <repository-url>
+cd web-scraping-system
 
-# 2. Install dependencies
+# 2. Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# 3. Install browser for Playwright
-playwright install chromium
+# 4. Configure
+cp .env.example .env
+# Edit .env if needed (defaults work fine)
 
-# 4. Start the API
-python -m uvicorn app.main:app --reload
+# 5. Run
+python run.py
 
-# 5. Test it
-curl -X POST http://localhost:8000/api/v1/search/fast \
+# Or use make
+make dev
+```
+
+## 📝 First API Calls
+
+### Search Google
+
+```bash
+curl -X POST http://localhost:8000/api/v1/search/google \
   -H "Content-Type: application/json" \
   -d '{"query": "python programming", "num_results": 5}'
 ```
 
-## Basic Usage Examples
+### Scrape a Website
 
-### Python
+```bash
+curl -X POST http://localhost:8000/api/v1/website/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+```
+
+### Extract Contacts
+
+```bash
+curl "http://localhost:8000/api/v1/website/extract/contacts?url=https://example.com"
+```
+
+## 🐍 Python Client
 
 ```python
 import requests
 
-# Fast search
-response = requests.post("http://localhost:8000/api/v1/search/fast", json={
-    "query": "machine learning tutorials",
-    "num_results": 10
-})
-print(response.json())
+# Search Google
+response = requests.post(
+    "http://localhost:8000/api/v1/search/google",
+    json={"query": "python", "num_results": 10}
+)
+results = response.json()
+print(f"Found {results['total_results']} results")
 
-# Google with fallback
-response = requests.post("http://localhost:8000/api/v1/search/google", json={
-    "query": "web scraping python",
-    "search_type": "all",
-    "num_results": 10
-})
-print(response.json())
+# Scrape website
+response = requests.post(
+    "http://localhost:8000/api/v1/website/scrape",
+    json={"url": "https://example.com"}
+)
+data = response.json()
+print(f"Title: {data['title']}")
+print(f"Emails: {data['contacts']['emails']}")
 ```
 
-### cURL
+Run the example client:
 
 ```bash
-# Fast search
-curl -X POST http://localhost:8000/api/v1/search/fast \
-  -H "Content-Type: application/json" \
-  -d '{"query": "python web scraping"}'
-
-# Parallel search (all engines)
-curl -X POST http://localhost:8000/api/v1/search/parallel \
-  -H "Content-Type: application/json" \
-  -d '{"query": "artificial intelligence", "num_results": 20}'
-
-# Batch search
-curl -X POST http://localhost:8000/api/v1/search/batch \
-  -H "Content-Type: application/json" \
-  -d '{"queries": ["python", "javascript", "rust"]}'
+python examples/example_usage.py
 ```
 
-### JavaScript
+## 📚 Interactive Documentation
 
-```javascript
-const response = await fetch('http://localhost:8000/api/v1/search/fast', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ query: 'react tutorials', num_results: 10 })
-});
-const data = await response.json();
-console.log(data);
+Open your browser:
+
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
+
+Try the API directly in your browser!
+
+## ⚙️ Optional Configuration
+
+### Add Proxies (Optional)
+
+Edit `config/proxies.txt`:
+
+```
+http://proxy1.example.com:8080
+http://user:pass@proxy2.example.com:3128
 ```
 
-## API Endpoints Summary
+### Install Redis (Optional, Recommended)
 
-| Endpoint | Description | Speed |
-|----------|-------------|-------|
-| `/api/v1/search/fast` | Fastest, uses DDG API | ⚡⚡⚡ |
-| `/api/v1/search/unified` | Smart with fallback | ⚡⚡ |
-| `/api/v1/search/google` | Google primary | ⚡⚡ |
-| `/api/v1/search/parallel` | All engines at once | ⚡ |
-
-## Response Format
-
-```json
-{
-  "success": true,
-  "query": "python programming",
-  "search_type": "all",
-  "total_results": 10,
-  "engine": "duckduckgo",
-  "response_time": 0.45,
-  "results": [
-    {
-      "title": "Python.org",
-      "url": "https://www.python.org",
-      "snippet": "The official home of the Python Programming Language..."
-    }
-  ]
-}
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install redis-server
+sudo systemctl start redis-server
 ```
 
-## Need Help?
+**macOS:**
+```bash
+brew install redis
+brew services start redis
+```
 
-- 📚 Full docs: http://localhost:8000/docs
-- 📊 System status: http://localhost:8000/status
-- ❤️ Health check: http://localhost:8000/health
+**Docker:**
+```bash
+docker run -d -p 6379:6379 redis:alpine
+```
+
+Then update `.env`:
+```env
+REDIS_HOST=localhost
+REDIS_PORT=6379
+```
+
+## 🎯 Common Use Cases
+
+### 1. Search Google News
+
+```bash
+curl -X POST http://localhost:8000/api/v1/search/google \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "technology news",
+    "search_type": "news",
+    "num_results": 20
+  }'
+```
+
+### 2. Batch Scrape Multiple Sites
+
+```bash
+curl -X POST http://localhost:8000/api/v1/website/scrape/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "urls": [
+      "https://example.com",
+      "https://example.org",
+      "https://example.net"
+    ]
+  }'
+```
+
+### 3. Search Both Engines
+
+```bash
+curl -X POST http://localhost:8000/api/v1/search/combined \
+  -H "Content-Type: application/json" \
+  -d '{"query": "machine learning", "num_results": 10}'
+```
+
+### 4. Deep Scrape (Follow Links)
+
+```bash
+curl -X POST http://localhost:8000/api/v1/website/scrape/deep \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "max_depth": 2,
+    "max_pages": 20
+  }'
+```
+
+## 📊 Check System Status
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Detailed status
+curl http://localhost:8000/status
+
+# Proxy statistics (if configured)
+curl http://localhost:8000/status | python -m json.tool
+```
+
+## 🛠️ Useful Commands
+
+```bash
+# Run with auto-reload (development)
+make dev
+
+# Run in production
+make run
+
+# Check configuration
+make check
+
+# View logs
+make logs
+
+# Clean temporary files
+make clean
+
+# Docker commands
+make docker-run
+make docker-stop
+make docker-logs
+```
+
+## 📈 Performance Tips
+
+1. **Use batch endpoints** for multiple requests
+2. **Add proxies** to avoid rate limiting
+3. **Install Redis** for better performance
+4. **Increase workers** in `.env` for more throughput
+5. **Use specific extract endpoints** (contacts, content, metadata) when you don't need everything
+
+## 🔧 Troubleshooting
+
+### API Won't Start
+
+```bash
+# Check if port 8000 is in use
+lsof -i :8000
+
+# Try different port
+python run.py --port 8001
+```
+
+### Redis Connection Error
+
+Redis is optional. System will work without it using in-memory rate limiting.
+
+```bash
+# Check if Redis is running
+redis-cli ping
+
+# Start Redis (if installed)
+redis-server
+```
+
+### Import Errors
+
+```bash
+# Make sure virtual environment is activated
+source venv/bin/activate
+
+# Reinstall dependencies
+pip install -r requirements.txt
+```
+
+### Playwright Errors
+
+```bash
+# Install browsers
+playwright install chromium
+```
+
+## 📖 Next Steps
+
+- **Full Documentation**: See [README.md](README.md)
+- **Setup Guide**: [docs/SETUP.md](docs/SETUP.md)
+- **Usage Guide**: [docs/USAGE.md](docs/USAGE.md)
+- **Configuration**: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+- **Examples**: [examples/example_usage.py](examples/example_usage.py)
+
+## 🎉 You're Ready!
+
+The Web Scraping System is now running and ready to use.
+
+Try the examples or start building your application!
+
+---
+
+**Need help?** Check the logs at `logs/scraper.log`
