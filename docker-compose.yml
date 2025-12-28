@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # Redis for rate limiting and caching
+  # Redis for rate limiting and caching (optional but recommended)
   redis:
     image: redis:7-alpine
     container_name: scraper-redis
@@ -9,7 +9,7 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -19,7 +19,7 @@ services:
       - scraper-network
     restart: unless-stopped
 
-  # Web Scraping API
+  # Web Scraping API - Main Service
   api:
     build:
       context: .
@@ -34,35 +34,49 @@ services:
       - API_WORKERS=4
       - DEBUG=False
       
-      # Rate Limiting
-      - MAX_SEARCH_REQUESTS_PER_MINUTE=60
-      - MAX_WEBSITE_REQUESTS_PER_MINUTE=30
-      - MAX_CONCURRENT_REQUESTS=50
+      # Rate Limiting - Optimized for 50+ req/min
+      - MAX_SEARCH_REQUESTS_PER_MINUTE=120
+      - MAX_WEBSITE_REQUESTS_PER_MINUTE=60
+      - MAX_CONCURRENT_REQUESTS=100
+      - CONNECTION_POOL_SIZE=100
       
-      # Redis Configuration
+      # Redis Configuration (optional)
+      - USE_REDIS=true
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
-      - REDIS_PASSWORD=
       
-      # Proxy Configuration
-      - USE_PROXY=True
-      - PROXY_ROTATION=True
-      - PROXY_TIMEOUT=30
+      # Proxy Configuration - Auto-fetch enabled
+      - USE_PROXY=true
+      - PROXY_ROTATION=true
+      - PROXY_TIMEOUT=10
+      - AUTO_FETCH_PROXIES=true
+      - PROXY_FETCH_INTERVAL=300
+      - MIN_WORKING_PROXIES=10
+      # Add custom proxies (comma-separated): CUSTOM_PROXIES=http://proxy1:8080,socks5://proxy2:1080
+      - CUSTOM_PROXIES=
       
       # Captcha Solving
-      - ENABLE_CAPTCHA_SOLVER=True
-      - CAPTCHA_TIMEOUT=60
+      - ENABLE_CAPTCHA_SOLVER=true
+      - CAPTCHA_TIMEOUT=30
+      - CAPTCHA_MAX_RETRIES=3
       
-      # Request Configuration
-      - REQUEST_TIMEOUT=30
-      - MAX_RETRIES=3
-      - RETRY_DELAY=2
+      # Request Configuration - Optimized for speed
+      - REQUEST_TIMEOUT=15
+      - MAX_RETRIES=2
+      - RETRY_DELAY=0.5
       
       # Scraping Configuration
-      - JAVASCRIPT_RENDERING=True
-      - BROWSER_HEADLESS=True
-      - PAGE_LOAD_TIMEOUT=30
+      - JAVASCRIPT_RENDERING=true
+      - BROWSER_HEADLESS=true
+      - PAGE_LOAD_TIMEOUT=15
+      
+      # Search Engine Fallback
+      - ENABLE_FALLBACK=true
+      - FALLBACK_ORDER=google,duckduckgo,bing,yahoo
+      
+      # Fingerprint Randomization
+      - RANDOMIZE_FINGERPRINT=true
       
       # Logging
       - LOG_LEVEL=INFO
@@ -71,7 +85,6 @@ services:
     volumes:
       - ./config:/app/config
       - ./logs:/app/logs
-      - ./app:/app/app  # For development hot-reload
     
     depends_on:
       redis:
@@ -82,7 +95,7 @@ services:
     
     restart: unless-stopped
     
-    # Resource limits
+    # Resource limits for production
     deploy:
       resources:
         limits:
@@ -92,7 +105,34 @@ services:
           cpus: '2'
           memory: 2G
 
-  # Nginx reverse proxy (optional)
+  # Development mode (with hot-reload)
+  api-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scraper-api-dev
+    ports:
+      - "8001:8000"
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - DEBUG=True
+      - LOG_LEVEL=DEBUG
+      - USE_REDIS=false
+      - USE_PROXY=true
+      - AUTO_FETCH_PROXIES=true
+      - ENABLE_CAPTCHA_SOLVER=true
+      - ENABLE_FALLBACK=true
+    volumes:
+      - ./app:/app/app
+      - ./config:/app/config
+      - ./logs:/app/logs
+    networks:
+      - scraper-network
+    profiles:
+      - dev
+
+  # Nginx reverse proxy (optional, for production)
   nginx:
     image: nginx:alpine
     container_name: scraper-nginx

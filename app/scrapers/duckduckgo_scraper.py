@@ -1,35 +1,47 @@
 """
 DuckDuckGo Search Results Scraper
-Supports: All, News, Images, Videos
+Uses duckduckgo-search library as primary method (fastest and most reliable)
+Supports: Web, News, Images, Videos
 """
 import asyncio
 from typing import List, Dict, Optional, Any
-from urllib.parse import urlencode, quote_plus
+from urllib.parse import urlencode
 from bs4 import BeautifulSoup
 from loguru import logger
 
 from app.core.request_handler import request_handler
 from app.core.rate_limiter import search_rate_limiter
-from app.utils.helpers import clean_text, sanitize_url
+from app.utils.helpers import clean_text
+
+# Import duckduckgo-search library (primary method)
+try:
+    from duckduckgo_search import DDGS
+    DDGS_AVAILABLE = True
+except ImportError:
+    DDGS_AVAILABLE = False
+    logger.warning("duckduckgo-search library not available, using HTML scraping fallback")
 
 
 class DuckDuckGoScraper:
     """
-    DuckDuckGo search results scraper
-    Uses HTML version for better scraping reliability
+    High-performance DuckDuckGo search results scraper
+    
+    Primary method: duckduckgo-search library (no scraping needed, fast and reliable)
+    Fallback: HTML scraping of html.duckduckgo.com
     """
     
     def __init__(self):
-        self.base_url = "https://html.duckduckgo.com/html/"
-        self.results_per_page = 10
-        self.max_pages = 5
+        self.html_base_url = "https://html.duckduckgo.com/html/"
+        self.results_per_page = 30
+        self.max_pages = 3
         
     async def search(
         self,
         query: str,
         search_type: str = "all",
         num_results: int = 10,
-        region: str = "us-en"
+        region: str = "us-en",
+        safe_search: str = "moderate"
     ) -> Dict[str, Any]:
         """
         Perform DuckDuckGo search
@@ -39,6 +51,7 @@ class DuckDuckGoScraper:
             search_type: Type of search (all, news, images, videos)
             num_results: Number of results to return
             region: Region code (e.g., us-en, uk-en)
+            safe_search: Safe search level (off, moderate, strict)
             
         Returns:
             Dict with search results
@@ -47,41 +60,22 @@ class DuckDuckGoScraper:
             # Rate limiting
             await search_rate_limiter.wait_for_token()
             
-            # Build parameters
-            params = self._build_params(query, search_type, region)
+            # Primary method: Use duckduckgo-search library
+            if DDGS_AVAILABLE:
+                result = await self._search_library(
+                    query, search_type, num_results, region, safe_search
+                )
+                if result['success'] and len(result['results']) > 0:
+                    return result
+                
+                logger.info("Library search failed, trying HTML scraping...")
             
-            # Calculate pages needed
-            pages_needed = min(
-                (num_results + self.results_per_page - 1) // self.results_per_page,
-                self.max_pages
+            # Fallback: HTML scraping
+            result = await self._search_html(
+                query, search_type, num_results, region
             )
             
-            # Scrape pages
-            all_results = []
-            
-            for page in range(pages_needed):
-                # DuckDuckGo requires sequential requests with form data
-                results = await self._scrape_page(params, page, search_type)
-                
-                if results:
-                    all_results.extend(results)
-                else:
-                    break  # No more results
-                
-                # Small delay between pages
-                if page < pages_needed - 1:
-                    await asyncio.sleep(1)
-            
-            # Limit to requested number
-            all_results = all_results[:num_results]
-            
-            return {
-                'success': True,
-                'query': query,
-                'search_type': search_type,
-                'total_results': len(all_results),
-                'results': all_results
-            }
+            return result
             
         except Exception as e:
             logger.error(f"DuckDuckGo search error: {str(e)}")
@@ -90,6 +84,259 @@ class DuckDuckGoScraper:
                 'error': str(e),
                 'query': query,
                 'search_type': search_type,
+                'engine': 'duckduckgo',
+                'results': []
+            }
+    
+    async def _search_library(
+        self,
+        query: str,
+        search_type: str,
+        num_results: int,
+        region: str,
+        safe_search: str
+    ) -> Dict[str, Any]:
+        """Search using duckduckgo-search library (fastest and most reliable)"""
+        try:
+            loop = asyncio.get_event_loop()
+            
+            # Map safe search
+            safesearch_map = {
+                'off': 'off',
+                'moderate': 'moderate',
+                'strict': 'on'
+            }
+            safesearch = safesearch_map.get(safe_search, 'moderate')
+            
+            results = []
+            
+            if search_type == "all":
+                results = await loop.run_in_executor(
+                    None,
+                    lambda: self._ddgs_text_search(query, region, safesearch, num_results)
+                )
+            elif search_type == "news":
+                results = await loop.run_in_executor(
+                    None,
+                    lambda: self._ddgs_news_search(query, region, safesearch, num_results)
+                )
+            elif search_type == "images":
+                results = await loop.run_in_executor(
+                    None,
+                    lambda: self._ddgs_image_search(query, region, safesearch, num_results)
+                )
+            elif search_type == "videos":
+                results = await loop.run_in_executor(
+                    None,
+                    lambda: self._ddgs_video_search(query, region, safesearch, num_results)
+                )
+            
+            return {
+                'success': len(results) > 0,
+                'query': query,
+                'search_type': search_type,
+                'engine': 'duckduckgo',
+                'method': 'library',
+                'total_results': len(results),
+                'results': results
+            }
+            
+        except Exception as e:
+            logger.error(f"DuckDuckGo library search error: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'query': query,
+                'search_type': search_type,
+                'engine': 'duckduckgo',
+                'method': 'library',
+                'results': []
+            }
+    
+    def _ddgs_text_search(
+        self,
+        query: str,
+        region: str,
+        safesearch: str,
+        num_results: int
+    ) -> List[Dict[str, Any]]:
+        """Synchronous text search using DDGS"""
+        results = []
+        try:
+            with DDGS() as ddgs:
+                for r in ddgs.text(
+                    query,
+                    region=region,
+                    safesearch=safesearch,
+                    max_results=num_results
+                ):
+                    results.append({
+                        'title': r.get('title', ''),
+                        'url': r.get('href', r.get('link', '')),
+                        'snippet': r.get('body', r.get('snippet', '')),
+                        'displayed_url': r.get('href', r.get('link', '')),
+                        'source': 'duckduckgo'
+                    })
+        except Exception as e:
+            logger.debug(f"DDGS text search error: {e}")
+        return results
+    
+    def _ddgs_news_search(
+        self,
+        query: str,
+        region: str,
+        safesearch: str,
+        num_results: int
+    ) -> List[Dict[str, Any]]:
+        """Synchronous news search using DDGS"""
+        results = []
+        try:
+            with DDGS() as ddgs:
+                for r in ddgs.news(
+                    query,
+                    region=region,
+                    safesearch=safesearch,
+                    max_results=num_results
+                ):
+                    results.append({
+                        'title': r.get('title', ''),
+                        'url': r.get('url', r.get('link', '')),
+                        'snippet': r.get('body', r.get('excerpt', '')),
+                        'source': r.get('source', ''),
+                        'date': r.get('date', ''),
+                        'type': 'news'
+                    })
+        except Exception as e:
+            logger.debug(f"DDGS news search error: {e}")
+        return results
+    
+    def _ddgs_image_search(
+        self,
+        query: str,
+        region: str,
+        safesearch: str,
+        num_results: int
+    ) -> List[Dict[str, Any]]:
+        """Synchronous image search using DDGS"""
+        results = []
+        try:
+            with DDGS() as ddgs:
+                for r in ddgs.images(
+                    query,
+                    region=region,
+                    safesearch=safesearch,
+                    max_results=num_results
+                ):
+                    results.append({
+                        'type': 'image',
+                        'image_url': r.get('image', ''),
+                        'thumbnail_url': r.get('thumbnail', r.get('image', '')),
+                        'title': r.get('title', ''),
+                        'page_url': r.get('url', ''),
+                        'width': r.get('width', 0),
+                        'height': r.get('height', 0),
+                        'source': 'duckduckgo'
+                    })
+        except Exception as e:
+            logger.debug(f"DDGS image search error: {e}")
+        return results
+    
+    def _ddgs_video_search(
+        self,
+        query: str,
+        region: str,
+        safesearch: str,
+        num_results: int
+    ) -> List[Dict[str, Any]]:
+        """Synchronous video search using DDGS"""
+        results = []
+        try:
+            with DDGS() as ddgs:
+                for r in ddgs.videos(
+                    query,
+                    region=region,
+                    safesearch=safesearch,
+                    max_results=num_results
+                ):
+                    results.append({
+                        'type': 'video',
+                        'title': r.get('title', ''),
+                        'url': r.get('content', r.get('url', '')),
+                        'thumbnail': r.get('images', {}).get('large', '') if isinstance(r.get('images'), dict) else '',
+                        'duration': r.get('duration', ''),
+                        'publisher': r.get('publisher', ''),
+                        'published': r.get('published', ''),
+                        'views': r.get('statistics', {}).get('viewCount', 0) if isinstance(r.get('statistics'), dict) else 0,
+                        'source': 'duckduckgo'
+                    })
+        except Exception as e:
+            logger.debug(f"DDGS video search error: {e}")
+        return results
+    
+    async def _search_html(
+        self,
+        query: str,
+        search_type: str,
+        num_results: int,
+        region: str
+    ) -> Dict[str, Any]:
+        """Fallback HTML scraping method"""
+        try:
+            params = self._build_params(query, search_type, region)
+            
+            pages_needed = min(
+                (num_results + self.results_per_page - 1) // self.results_per_page,
+                self.max_pages
+            )
+            
+            all_results = []
+            
+            for page in range(pages_needed):
+                form_data = params.copy()
+                
+                if page > 0:
+                    form_data['s'] = str(page * 30)
+                    form_data['dc'] = str(page * 30)
+                
+                result = await request_handler.request(
+                    self.html_base_url,
+                    method="POST",
+                    data=form_data
+                )
+                
+                if result.success and result.html:
+                    page_results = self._parse_html_results(result.html, search_type)
+                    all_results.extend(page_results)
+                    
+                    if len(page_results) < 5:
+                        break
+                else:
+                    break
+                
+                if page < pages_needed - 1:
+                    await asyncio.sleep(0.5)
+            
+            all_results = all_results[:num_results]
+            
+            return {
+                'success': len(all_results) > 0,
+                'query': query,
+                'search_type': search_type,
+                'engine': 'duckduckgo',
+                'method': 'html_scraping',
+                'total_results': len(all_results),
+                'results': all_results
+            }
+            
+        except Exception as e:
+            logger.error(f"DuckDuckGo HTML scraping error: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'query': query,
+                'search_type': search_type,
+                'engine': 'duckduckgo',
+                'method': 'html_scraping',
                 'results': []
             }
     
@@ -98,9 +345,9 @@ class DuckDuckGoScraper:
         params = {
             'q': query,
             'kl': region,
+            'kp': '-1',  # Safe search off by default for HTML
         }
         
-        # Add type-specific parameters
         if search_type == "news":
             params['iar'] = 'news'
             params['ia'] = 'news'
@@ -115,56 +362,15 @@ class DuckDuckGoScraper:
         
         return params
     
-    async def _scrape_page(
-        self,
-        params: Dict[str, str],
-        page: int,
-        search_type: str
-    ) -> List[Dict[str, Any]]:
-        """Scrape a single results page"""
-        
-        # For HTML version, use POST with form data
-        form_data = params.copy()
-        
-        # Add pagination
-        if page > 0:
-            form_data['s'] = str(page * 30)  # DuckDuckGo uses 30 results per page
-            form_data['dc'] = str(page * 30)
-            form_data['api'] = 'd.js'
-        
-        # Make request
-        result = await request_handler.request(
-            self.base_url,
-            method="POST",
-            data=form_data
-        )
-        
-        if not result.success:
-            logger.warning(f"Failed to scrape DuckDuckGo page: {result.error}")
-            return []
-        
-        # Parse based on search type
-        if search_type == "all":
-            return self._parse_all_results(result.html)
-        elif search_type == "news":
-            return self._parse_news_results(result.html)
-        elif search_type == "images":
-            return self._parse_image_results(result.html)
-        elif search_type == "videos":
-            return self._parse_video_results(result.html)
-        
-        return []
-    
-    def _parse_all_results(self, html: str) -> List[Dict[str, Any]]:
-        """Parse standard search results"""
+    def _parse_html_results(self, html: str, search_type: str) -> List[Dict[str, Any]]:
+        """Parse HTML scraping results"""
         soup = BeautifulSoup(html, 'lxml')
         results = []
         
-        # DuckDuckGo HTML results are in divs with class 'result'
-        for div in soup.select('div.result'):
+        for div in soup.select('div.result, div.results_links'):
             try:
                 # Title and URL
-                title_elem = div.select_one('a.result__a')
+                title_elem = div.select_one('a.result__a') or div.select_one('h2 a')
                 if not title_elem:
                     continue
                 
@@ -172,142 +378,112 @@ class DuckDuckGoScraper:
                 url = title_elem.get('href', '')
                 
                 # Snippet
-                snippet_elem = div.select_one('a.result__snippet')
+                snippet_elem = div.select_one('a.result__snippet') or div.select_one('.result__snippet')
                 snippet = clean_text(snippet_elem.get_text()) if snippet_elem else ""
                 
                 if title and url:
-                    results.append({
-                        'title': title,
-                        'url': url,
-                        'snippet': snippet
-                    })
-                    
-            except Exception as e:
-                logger.debug(f"Error parsing result: {e}")
-                continue
-        
-        return results
-    
-    def _parse_news_results(self, html: str) -> List[Dict[str, Any]]:
-        """Parse news search results"""
-        soup = BeautifulSoup(html, 'lxml')
-        results = []
-        
-        # News results in DuckDuckGo
-        for div in soup.select('div.result'):
-            try:
-                # Check if it's a news result
-                if 'news' not in div.get('class', []):
-                    news_indicator = div.select_one('span.result__type')
-                    if not news_indicator or 'news' not in news_indicator.get_text().lower():
-                        # Try standard parsing anyway
-                        pass
-                
-                # Title and URL
-                title_elem = div.select_one('a.result__a')
-                if not title_elem:
-                    continue
-                
-                title = clean_text(title_elem.get_text())
-                url = title_elem.get('href', '')
-                
-                # Snippet
-                snippet_elem = div.select_one('a.result__snippet')
-                snippet = clean_text(snippet_elem.get_text()) if snippet_elem else ""
-                
-                # Source and date
-                source_elem = div.select_one('span.result__url')
-                source = clean_text(source_elem.get_text()) if source_elem else ""
-                
-                if title and url:
-                    results.append({
+                    result = {
                         'title': title,
                         'url': url,
                         'snippet': snippet,
-                        'source': source,
-                        'type': 'news'
-                    })
+                        'source': 'duckduckgo'
+                    }
+                    
+                    if search_type == "news":
+                        result['type'] = 'news'
+                        # Extract source/date if available
+                        source_elem = div.select_one('.result__extras__url')
+                        if source_elem:
+                            result['source'] = clean_text(source_elem.get_text())
+                    
+                    results.append(result)
                     
             except Exception as e:
-                logger.debug(f"Error parsing news result: {e}")
+                logger.debug(f"Error parsing DDG result: {e}")
                 continue
         
         return results
+
+
+# OSINT and Instant Answers
+class DuckDuckGoInstantAnswer:
+    """
+    DuckDuckGo Instant Answers API
+    Provides quick structured data without full search
+    """
     
-    def _parse_image_results(self, html: str) -> List[Dict[str, Any]]:
-        """Parse image search results"""
-        soup = BeautifulSoup(html, 'lxml')
-        results = []
-        
-        # Image results
-        for div in soup.select('div.tile'):
-            try:
-                # Image
-                img = div.select_one('img')
-                if not img:
-                    continue
-                
-                image_url = img.get('src') or img.get('data-src', '')
-                alt = img.get('alt', '')
-                
-                # Page URL
-                link = div.select_one('a')
-                page_url = link.get('href', '') if link else ""
-                
-                if image_url:
-                    results.append({
-                        'type': 'image',
-                        'image_url': image_url,
-                        'alt': alt,
-                        'page_url': page_url
-                    })
-                    
-            except Exception as e:
-                logger.debug(f"Error parsing image result: {e}")
-                continue
-        
-        return results
+    def __init__(self):
+        self.api_url = "https://api.duckduckgo.com/"
     
-    def _parse_video_results(self, html: str) -> List[Dict[str, Any]]:
-        """Parse video search results"""
-        soup = BeautifulSoup(html, 'lxml')
-        results = []
+    async def get_instant_answer(self, query: str) -> Dict[str, Any]:
+        """
+        Get instant answer for a query
         
-        # Video results similar to standard results
-        for div in soup.select('div.result'):
-            try:
-                # Check if video result
-                type_elem = div.select_one('span.result__type')
-                if type_elem and 'video' not in type_elem.get_text().lower():
-                    continue
+        Args:
+            query: Search query
+            
+        Returns:
+            Dict with instant answer data
+        """
+        try:
+            params = {
+                'q': query,
+                'format': 'json',
+                'no_html': '1',
+                'skip_disambig': '1',
+            }
+            
+            url = f"{self.api_url}?{urlencode(params)}"
+            
+            result = await request_handler.request(url, method="GET")
+            
+            if result.success and result.html:
+                import json
+                data = json.loads(result.html)
                 
-                # Title and URL
-                title_elem = div.select_one('a.result__a')
-                if not title_elem:
-                    continue
-                
-                title = clean_text(title_elem.get_text())
-                url = title_elem.get('href', '')
-                
-                # Snippet
-                snippet_elem = div.select_one('a.result__snippet')
-                snippet = clean_text(snippet_elem.get_text()) if snippet_elem else ""
-                
-                # Duration (if available)
-                duration_elem = div.select_one('span.result__duration')
-                duration = clean_text(duration_elem.get_text()) if duration_elem else ""
-                
-                if title and url:
-                    results.append({
-                        'type': 'video',
-                        'title': title,
-                        'url': url,
-                        'snippet': snippet,
-                        'duration': duration
-                    })
-                    
-            except Exception as e:
-                logger.debug(f"Error parsing video result: {e}")
-                continue
-        
-        return results
+                return {
+                    'success': True,
+                    'query': query,
+                    'abstract': data.get('Abstract', ''),
+                    'abstract_source': data.get('AbstractSource', ''),
+                    'abstract_url': data.get('AbstractURL', ''),
+                    'image': data.get('Image', ''),
+                    'heading': data.get('Heading', ''),
+                    'answer': data.get('Answer', ''),
+                    'answer_type': data.get('AnswerType', ''),
+                    'definition': data.get('Definition', ''),
+                    'definition_source': data.get('DefinitionSource', ''),
+                    'related_topics': [
+                        {
+                            'text': t.get('Text', ''),
+                            'url': t.get('FirstURL', ''),
+                        }
+                        for t in data.get('RelatedTopics', [])
+                        if isinstance(t, dict) and t.get('Text')
+                    ][:10],
+                    'results': [
+                        {
+                            'text': r.get('Text', ''),
+                            'url': r.get('FirstURL', ''),
+                        }
+                        for r in data.get('Results', [])
+                    ]
+                }
+            
+            return {
+                'success': False,
+                'error': 'Failed to get instant answer',
+                'query': query
+            }
+            
+        except Exception as e:
+            logger.error(f"DuckDuckGo instant answer error: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'query': query
+            }
+
+
+# Export for use
+__all__ = ['DuckDuckGoScraper', 'DuckDuckGoInstantAnswer']

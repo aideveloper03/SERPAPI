@@ -6,40 +6,50 @@ pydantic-settings==2.1.0
 
 # Async HTTP Clients
 aiohttp==3.9.1
-brotli==1.1.0
-brotlipy==0.7.0
+aiofiles==23.2.1
 httpx==0.26.0
 requests==2.31.0
+
+# Brotli compression support (CRITICAL for Google scraping)
+Brotli==1.1.0
+brotlicffi==1.1.0.0
 
 # Web Scraping
 beautifulsoup4==4.12.3
 lxml==5.1.0
 selenium==4.16.0
 playwright==1.41.0
-pyppeteer==2.0.0
+undetected-chromedriver==3.5.4
 
 # HTML Parsing & Content Extraction
 html5lib==1.1
 cssselect==1.2.0
 extruct==0.16.0
 w3lib==2.1.2
+trafilatura==1.6.2
 
 # Proxy & IP Management
 aiohttp-socks==0.8.4
-python-socks==2.4.3
+python-socks[asyncio]==2.4.3
 fake-useragent==1.4.0
 user-agents==2.2.0
 
-# Captcha Solving
-opencv-python==4.9.0.80
+# Captcha Solving & Anti-Detection
+opencv-python-headless==4.9.0.80
 numpy==1.26.3
 pillow==10.2.0
 pytesseract==0.3.10
+scipy==1.12.0
+easyocr==1.7.1
+
+# Speech recognition for audio captcha
+SpeechRecognition==3.10.1
+pydub==0.25.1
 
 # Rate Limiting & Caching
 redis==5.0.1
-aioredis==2.0.1
 limits==3.7.0
+cachetools==5.3.2
 
 # Data Processing
 pandas==2.2.0
@@ -48,9 +58,7 @@ email-validator==2.1.0
 tldextract==5.1.1
 
 # Concurrency & Performance
-asyncio==3.4.3
 aiodns==3.1.1
-aiofiles==23.2.1
 uvloop==0.19.0
 
 # Configuration
@@ -64,4 +72,11 @@ python-json-logger==2.0.7
 
 # Alternative Search Libraries
 googlesearch-python==1.2.4
-duckduckgo-search==4.1.1
+duckduckgo-search==5.3.0
+
+# Fingerprint randomization
+ua-parser==0.18.0
+
+# OSINT and data extraction
+whois==0.9.27
+dnspython==2.4.2
