@@ -225,8 +225,10 @@ class GoogleScraper:
             
             all_results = all_results[:num_results]
             
-            return {
-                'success': len(all_results) > 0,
+            has_results = len(all_results) > 0
+            
+            response = {
+                'success': has_results,
                 'query': query,
                 'search_type': search_type,
                 'engine': 'google',
@@ -234,6 +236,12 @@ class GoogleScraper:
                 'total_results': len(all_results),
                 'results': all_results
             }
+            
+            # Add error message if no results
+            if not has_results:
+                response['error'] = 'No results found - selectors may be outdated or page layout changed'
+            
+            return response
             
         except Exception as e:
             logger.error(f"Direct search error: {e}")
@@ -285,8 +293,10 @@ class GoogleScraper:
                 results = self._parse_results(result.html, search_type)
                 results = results[:num_results]
                 
-                return {
-                    'success': len(results) > 0,
+                has_results = len(results) > 0
+                
+                response = {
+                    'success': has_results,
                     'query': query,
                     'search_type': search_type,
                     'engine': 'google',
@@ -294,6 +304,11 @@ class GoogleScraper:
                     'total_results': len(results),
                     'results': results
                 }
+                
+                if not has_results:
+                    response['error'] = 'No results found from mobile version'
+                
+                return response
             
             return {'success': False, 'error': 'Request failed', 'query': query, 'search_type': search_type, 'engine': 'google', 'results': [], 'method': 'mobile'}
             
@@ -335,8 +350,10 @@ class GoogleScraper:
                 results = self._parse_results(result.html, search_type)
                 results = results[:num_results]
                 
-                return {
-                    'success': len(results) > 0,
+                has_results = len(results) > 0
+                
+                response = {
+                    'success': has_results,
                     'query': query,
                     'search_type': search_type,
                     'engine': 'google',
@@ -344,6 +361,11 @@ class GoogleScraper:
                     'total_results': len(results),
                     'results': results
                 }
+                
+                if not has_results:
+                    response['error'] = 'No results found from browser automation'
+                
+                return response
             
             return {'success': False, 'error': 'Browser request failed', 'query': query, 'search_type': search_type, 'engine': 'google', 'results': [], 'method': 'browser'}
             
@@ -394,8 +416,10 @@ class GoogleScraper:
             
             logger.info(f"Library returned {len(results)} results")
             
-            return {
-                'success': len(results) > 0,
+            has_results = len(results) > 0
+            
+            response = {
+                'success': has_results,
                 'query': query,
                 'search_type': 'all',
                 'engine': 'google',
@@ -403,6 +427,11 @@ class GoogleScraper:
                 'total_results': len(results),
                 'results': results
             }
+            
+            if not has_results:
+                response['error'] = 'No results from googlesearch-python library'
+            
+            return response
             
         except Exception as e:
             logger.error(f"Library search error: {e}")
