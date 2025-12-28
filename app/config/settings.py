@@ -1,6 +1,6 @@
 """
 Configuration management using Pydantic settings
-High-performance settings for production scraping
+Loads from environment variables and config files
 """
 import os
 from typing import Optional, List, Dict, Any
@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """Application settings optimized for high-volume scraping"""
+    """Application settings"""
     
     # API Configuration
     api_host: str = Field(default="0.0.0.0", env="API_HOST")
@@ -19,10 +19,10 @@ class Settings(BaseSettings):
     api_workers: int = Field(default=4, env="API_WORKERS")
     debug: bool = Field(default=False, env="DEBUG")
     
-    # Rate Limiting (optimized for 50+ requests/minute)
-    max_search_requests_per_minute: int = Field(default=100, env="MAX_SEARCH_REQUESTS_PER_MINUTE")
-    max_website_requests_per_minute: int = Field(default=60, env="MAX_WEBSITE_REQUESTS_PER_MINUTE")
-    max_concurrent_requests: int = Field(default=100, env="MAX_CONCURRENT_REQUESTS")
+    # Rate Limiting
+    max_search_requests_per_minute: int = Field(default=60, env="MAX_SEARCH_REQUESTS_PER_MINUTE")
+    max_website_requests_per_minute: int = Field(default=30, env="MAX_WEBSITE_REQUESTS_PER_MINUTE")
+    max_concurrent_requests: int = Field(default=50, env="MAX_CONCURRENT_REQUESTS")
     
     # Redis Configuration
     redis_host: str = Field(default="localhost", env="REDIS_HOST")
@@ -33,31 +33,21 @@ class Settings(BaseSettings):
     # Proxy Configuration
     use_proxy: bool = Field(default=True, env="USE_PROXY")
     proxy_rotation: bool = Field(default=True, env="PROXY_ROTATION")
-    proxy_timeout: int = Field(default=15, env="PROXY_TIMEOUT")
-    auto_fetch_proxies: bool = Field(default=True, env="AUTO_FETCH_PROXIES")
+    proxy_timeout: int = Field(default=30, env="PROXY_TIMEOUT")
     
-    # Captcha Solving (optional API keys)
+    # Captcha Solving
     enable_captcha_solver: bool = Field(default=True, env="ENABLE_CAPTCHA_SOLVER")
-    captcha_timeout: int = Field(default=120, env="CAPTCHA_TIMEOUT")
-    twocaptcha_api_key: Optional[str] = Field(default=None, env="TWOCAPTCHA_API_KEY")
-    anticaptcha_api_key: Optional[str] = Field(default=None, env="ANTICAPTCHA_API_KEY")
-    capmonster_api_key: Optional[str] = Field(default=None, env="CAPMONSTER_API_KEY")
+    captcha_timeout: int = Field(default=60, env="CAPTCHA_TIMEOUT")
     
-    # Request Configuration (optimized for speed)
-    request_timeout: int = Field(default=15, env="REQUEST_TIMEOUT")
-    max_retries: int = Field(default=2, env="MAX_RETRIES")
-    retry_delay: float = Field(default=0.5, env="RETRY_DELAY")
+    # Request Configuration
+    request_timeout: int = Field(default=30, env="REQUEST_TIMEOUT")
+    max_retries: int = Field(default=3, env="MAX_RETRIES")
+    retry_delay: int = Field(default=2, env="RETRY_DELAY")
     
     # Scraping Configuration
     javascript_rendering: bool = Field(default=True, env="JAVASCRIPT_RENDERING")
     browser_headless: bool = Field(default=True, env="BROWSER_HEADLESS")
-    page_load_timeout: int = Field(default=15, env="PAGE_LOAD_TIMEOUT")
-    
-    # Search Configuration
-    default_search_engine: str = Field(default="google", env="DEFAULT_SEARCH_ENGINE")
-    enable_fallback: bool = Field(default=True, env="ENABLE_FALLBACK")
-    cache_results: bool = Field(default=True, env="CACHE_RESULTS")
-    cache_ttl: int = Field(default=300, env="CACHE_TTL")  # 5 minutes
+    page_load_timeout: int = Field(default=30, env="PAGE_LOAD_TIMEOUT")
     
     # Logging
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
@@ -71,20 +61,11 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
-        extra = "ignore"
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Ensure directories exist
         self.logs_dir.mkdir(exist_ok=True)
-        
-        # Set captcha API keys as environment variables
-        if self.twocaptcha_api_key:
-            os.environ['TWOCAPTCHA_API_KEY'] = self.twocaptcha_api_key
-        if self.anticaptcha_api_key:
-            os.environ['ANTICAPTCHA_API_KEY'] = self.anticaptcha_api_key
-        if self.capmonster_api_key:
-            os.environ['CAPMONSTER_API_KEY'] = self.capmonster_api_key
         
     def load_yaml_config(self) -> Dict[str, Any]:
         """Load YAML configuration file"""

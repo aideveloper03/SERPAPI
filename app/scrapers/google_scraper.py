@@ -1,13 +1,11 @@
 """
-Advanced Google Search Results Scraper
-Fast, reliable scraping with multiple strategies and modern selectors
-Supports: All, News, Images, Videos with automatic fallback
+Google Search Results Scraper with Multiple Fallback Strategies
+Supports: All, News, Images, Videos
+Includes googlesearch-python library as ultimate fallback
 """
 import asyncio
-import re
-import time
 from typing import List, Dict, Optional, Any
-from urllib.parse import urlencode, quote_plus, unquote, urlparse, parse_qs
+from urllib.parse import urlencode, quote_plus
 from bs4 import BeautifulSoup
 from loguru import logger
 
@@ -15,28 +13,18 @@ from app.core.request_handler import request_handler
 from app.core.rate_limiter import search_rate_limiter
 from app.utils.helpers import clean_text, sanitize_url
 
-# Import alternative search libraries
+# Import alternative search library as fallback
 try:
     from googlesearch import search as google_search_lib
     GOOGLESEARCH_AVAILABLE = True
 except ImportError:
     GOOGLESEARCH_AVAILABLE = False
-
-try:
-    from duckduckgo_search import DDGS
-    DDGS_AVAILABLE = True
-except ImportError:
-    DDGS_AVAILABLE = False
+    logger.warning("googlesearch-python not available")
 
 
 class GoogleScraper:
     """
-    Advanced Google search results scraper with:
-    - Multiple parsing strategies for resilience
-    - Fast concurrent page scraping
-    - Automatic fallback to alternative libraries
-    - Modern 2024 selector support
-    - Intelligent result deduplication
+    Google search results scraper with multiple search types and fallback strategies
     """
     
     def __init__(self):
@@ -44,63 +32,13 @@ class GoogleScraper:
         self.results_per_page = 10
         self.max_pages = 5
         
-        # Multiple Google domains for rotation
-        self.google_domains = [
-            "https://www.google.com",
-            "https://www.google.co.uk",
-            "https://www.google.ca",
-            "https://www.google.com.au",
-        ]
-        
-        # Modern 2024 selectors (Google frequently changes these)
-        self.result_selectors = [
-            # Primary selectors (2024)
-            'div.g',
-            'div[data-hveid]',
-            'div[data-sokoban-container]',
-            # Secondary selectors
-            'div.tF2Cxc',
-            'div.yuRUbf',
-            'div.N54PNb',
-            'div.kb0PBd',
-            # Legacy selectors
-            'div.rc',
-            'div.srg div.g',
-        ]
-        
-        self.title_selectors = [
-            'h3',
-            'div[role="heading"]',
-            'a h3',
-            '.DKV0Md',
-            '.LC20lb',
-        ]
-        
-        self.link_selectors = [
-            'a[href^="http"]',
-            'a[data-ved]',
-            'div.yuRUbf > a',
-            'a.cz3goc',
-        ]
-        
-        self.snippet_selectors = [
-            'div.VwiC3b',
-            'div[data-sncf]',
-            'span.aCOpRe',
-            'div.s',
-            '.lEBKkf',
-            '.yXK7lf',
-        ]
-        
     async def search(
         self,
         query: str,
         search_type: str = "all",
         num_results: int = 10,
         language: str = "en",
-        country: str = "US",
-        use_alternative: bool = False,
-        fast_mode: bool = True
+        use_alternative: bool = False
     ) -> Dict[str, Any]:
         """
         Perform Google search with multiple fallback strategies
@@ -110,54 +48,44 @@ class GoogleScraper:
             search_type: Type of search (all, news, images, videos)
             num_results: Number of results to return
             language: Language code
-            country: Country code
             use_alternative: Force use of alternative library
-            fast_mode: Use faster scraping methods
             
         Returns:
             Dict with search results
         """
-        start_time = time.time()
-        
         try:
             # Rate limiting
             await search_rate_limiter.wait_for_token()
             
-            # Strategy 1: Fast API-based search (if available and preferred)
-            if fast_mode and DDGS_AVAILABLE and search_type == "all":
-                result = await self._search_ddgs_api(query, num_results)
-                if result['success'] and len(result['results']) > 0:
-                    result['response_time'] = time.time() - start_time
-                    result['method'] = 'ddgs_api'
-                    return result
-            
-            # Strategy 2: Direct scraping
+            # If alternative library is requested or search type is not 'all', use standard scraping
             if not use_alternative:
-                result = await self._search_direct(query, search_type, num_results, language, country)
+                # Try standard scraping first
+                result = await self._search_standard(query, search_type, num_results, language)
                 if result['success'] and len(result['results']) > 0:
-                    result['response_time'] = time.time() - start_time
                     return result
                 
-                logger.debug(f"Direct scraping returned {len(result.get('results', []))} results")
-            
-            # Strategy 3: Alternative googlesearch-python library
-            if search_type == "all" and GOOGLESEARCH_AVAILABLE:
-                logger.debug("Trying googlesearch-python library...")
-                result = await self._search_googlesearch_lib(query, num_results, language)
+                logger.warning(f"Standard scraping returned no results, trying browser method...")
+                
+                # Try with browser if standard fails
+                result = await self._search_with_browser(query, search_type, num_results, language)
                 if result['success'] and len(result['results']) > 0:
-                    result['response_time'] = time.time() - start_time
                     return result
             
-            # All strategies failed
+            # Last resort: Use googlesearch-python library (only works for 'all' type)
+            if search_type == "all" and GOOGLESEARCH_AVAILABLE:
+                logger.info("Trying alternative googlesearch-python library...")
+                result = await self._search_alternative_library(query, num_results, language)
+                if result['success'] and len(result['results']) > 0:
+                    return result
+            
+            # If everything failed, return what we have
             return {
                 'success': False,
-                'error': 'All Google search strategies failed',
+                'error': 'All search strategies failed',
                 'query': query,
                 'search_type': search_type,
                 'total_results': 0,
-                'results': [],
-                'response_time': time.time() - start_time,
-                'engine': 'google'
+                'results': []
             }
             
         except Exception as e:
@@ -167,58 +95,20 @@ class GoogleScraper:
                 'error': str(e),
                 'query': query,
                 'search_type': search_type,
-                'results': [],
-                'response_time': time.time() - start_time,
-                'engine': 'google'
+                'results': []
             }
     
-    async def _search_ddgs_api(self, query: str, num_results: int) -> Dict[str, Any]:
-        """Fast search using DuckDuckGo API (often mirrors Google results)"""
-        try:
-            loop = asyncio.get_event_loop()
-            
-            def do_search():
-                with DDGS() as ddgs:
-                    results = list(ddgs.text(query, max_results=num_results))
-                    return results
-            
-            results = await loop.run_in_executor(None, do_search)
-            
-            formatted_results = []
-            for r in results:
-                formatted_results.append({
-                    'title': r.get('title', ''),
-                    'url': r.get('href', r.get('link', '')),
-                    'snippet': r.get('body', r.get('snippet', '')),
-                    'displayed_url': r.get('href', '')
-                })
-            
-            return {
-                'success': len(formatted_results) > 0,
-                'query': query,
-                'search_type': 'all',
-                'total_results': len(formatted_results),
-                'results': formatted_results,
-                'method': 'ddgs_api',
-                'engine': 'google'
-            }
-            
-        except Exception as e:
-            logger.debug(f"DDGS API search failed: {e}")
-            return {'success': False, 'results': [], 'error': str(e)}
-    
-    async def _search_direct(
+    async def _search_standard(
         self,
         query: str,
         search_type: str,
         num_results: int,
-        language: str,
-        country: str
+        language: str
     ) -> Dict[str, Any]:
-        """Direct Google scraping with optimized requests"""
+        """Standard scraping using aiohttp"""
         try:
-            # Build parameters
-            params = self._build_params(query, search_type, language, country)
+            # Determine search type parameters
+            params = self._build_params(query, search_type, language)
             
             # Calculate pages needed
             pages_needed = min(
@@ -226,12 +116,12 @@ class GoogleScraper:
                 self.max_pages
             )
             
-            # Scrape pages concurrently for speed
+            # Scrape multiple pages concurrently
             tasks = []
             for page in range(pages_needed):
                 page_params = params.copy()
                 page_params['start'] = page * self.results_per_page
-                tasks.append(self._scrape_page(page_params, search_type))
+                tasks.append(self._scrape_page(page_params, search_type, use_browser=False))
             
             # Gather results
             page_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -240,46 +130,84 @@ class GoogleScraper:
             all_results = []
             for result in page_results:
                 if isinstance(result, Exception):
-                    logger.debug(f"Page scraping error: {result}")
+                    logger.error(f"Page scraping error: {result}")
                     continue
                 if result:
                     all_results.extend(result)
             
-            # Deduplicate by URL
-            seen_urls = set()
-            unique_results = []
-            for r in all_results:
-                url = r.get('url', '')
-                if url and url not in seen_urls:
-                    seen_urls.add(url)
-                    unique_results.append(r)
-            
             # Limit to requested number
-            unique_results = unique_results[:num_results]
+            all_results = all_results[:num_results]
             
             return {
-                'success': len(unique_results) > 0,
+                'success': len(all_results) > 0,
                 'query': query,
                 'search_type': search_type,
-                'total_results': len(unique_results),
-                'results': unique_results,
-                'method': 'direct',
-                'engine': 'google'
+                'total_results': len(all_results),
+                'results': all_results,
+                'method': 'standard'
             }
-            
         except Exception as e:
-            logger.error(f"Direct search error: {e}")
+            logger.error(f"Standard search error: {e}")
             return {
                 'success': False,
                 'error': str(e),
                 'query': query,
                 'search_type': search_type,
                 'results': [],
-                'method': 'direct',
-                'engine': 'google'
+                'method': 'standard'
             }
     
-    async def _search_googlesearch_lib(
+    async def _search_with_browser(
+        self,
+        query: str,
+        search_type: str,
+        num_results: int,
+        language: str
+    ) -> Dict[str, Any]:
+        """Search using browser automation"""
+        try:
+            params = self._build_params(query, search_type, language)
+            
+            # For browser, we'll scrape fewer pages to avoid detection
+            pages_needed = min(2, (num_results + self.results_per_page - 1) // self.results_per_page)
+            
+            all_results = []
+            for page in range(pages_needed):
+                page_params = params.copy()
+                page_params['start'] = page * self.results_per_page
+                
+                # Use browser for this page
+                results = await self._scrape_page(page_params, search_type, use_browser=True)
+                if results:
+                    all_results.extend(results)
+                
+                # Add delay between pages to avoid detection
+                if page < pages_needed - 1:
+                    await asyncio.sleep(3)
+            
+            # Limit to requested number
+            all_results = all_results[:num_results]
+            
+            return {
+                'success': len(all_results) > 0,
+                'query': query,
+                'search_type': search_type,
+                'total_results': len(all_results),
+                'results': all_results,
+                'method': 'browser'
+            }
+        except Exception as e:
+            logger.error(f"Browser search error: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'query': query,
+                'search_type': search_type,
+                'results': [],
+                'method': 'browser'
+            }
+    
+    async def _search_alternative_library(
         self,
         query: str,
         num_results: int,
@@ -289,38 +217,39 @@ class GoogleScraper:
         try:
             loop = asyncio.get_event_loop()
             
-            def do_search():
-                try:
-                    return list(google_search_lib(
-                        query,
-                        num_results=num_results,
-                        lang=language,
-                        sleep_interval=1,
-                        advanced=True
-                    ))
-                except Exception as e:
-                    logger.debug(f"googlesearch-python error: {e}")
-                    return []
+            # Run in executor since googlesearch is synchronous
+            urls = await loop.run_in_executor(
+                None,
+                lambda: list(google_search_lib(
+                    query,
+                    num_results=num_results,
+                    lang=language,
+                    sleep_interval=2,
+                    advanced=True
+                ))
+            )
             
-            urls = await loop.run_in_executor(None, do_search)
-            
-            # Format results
+            # Format results to match our standard format
             results = []
             for item in urls[:num_results]:
                 if isinstance(item, str):
+                    # Simple URL result
                     results.append({
                         'title': '',
                         'url': item,
                         'snippet': '',
                         'displayed_url': item
                     })
-                elif hasattr(item, 'url'):
+                elif isinstance(item, dict):
+                    # Advanced result with more info
                     results.append({
-                        'title': getattr(item, 'title', ''),
-                        'url': getattr(item, 'url', ''),
-                        'snippet': getattr(item, 'description', ''),
-                        'displayed_url': getattr(item, 'url', '')
+                        'title': item.get('title', ''),
+                        'url': item.get('url', ''),
+                        'snippet': item.get('description', ''),
+                        'displayed_url': item.get('url', '')
                     })
+            
+            logger.info(f"Alternative library returned {len(results)} results")
             
             return {
                 'success': len(results) > 0,
@@ -328,31 +257,25 @@ class GoogleScraper:
                 'search_type': 'all',
                 'total_results': len(results),
                 'results': results,
-                'method': 'googlesearch-python',
-                'engine': 'google'
+                'method': 'googlesearch-python'
             }
-            
         except Exception as e:
-            logger.debug(f"googlesearch-python error: {e}")
-            return {'success': False, 'results': [], 'error': str(e)}
+            logger.error(f"Alternative library search error: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'query': query,
+                'search_type': 'all',
+                'results': [],
+                'method': 'googlesearch-python'
+            }
     
-    def _build_params(
-        self,
-        query: str,
-        search_type: str,
-        language: str,
-        country: str
-    ) -> Dict[str, str]:
+    def _build_params(self, query: str, search_type: str, language: str) -> Dict[str, str]:
         """Build search parameters"""
         params = {
             'q': query,
             'hl': language,
-            'gl': country,
-            'num': self.results_per_page,
-            'ie': 'UTF-8',
-            'oe': 'UTF-8',
-            'pws': '0',  # Disable personalized results
-            'filter': '0',  # Disable filtering
+            'num': self.results_per_page
         }
         
         # Add type-specific parameters
@@ -366,42 +289,30 @@ class GoogleScraper:
         return params
     
     async def _scrape_page(
-        self,
-        params: Dict[str, str],
-        search_type: str
+        self, 
+        params: Dict[str, str], 
+        search_type: str,
+        use_browser: bool = False
     ) -> List[Dict[str, Any]]:
-        """Scrape a single results page with optimized parsing"""
+        """Scrape a single results page"""
+        url = f"{self.base_url}?{urlencode(params)}"
         
-        # Use random Google domain
-        import random
-        base_domain = random.choice(self.google_domains)
-        url = f"{base_domain}/search?{urlencode(params)}"
-        
-        # Custom headers for Google
-        headers = {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': f'{params.get("hl", "en")},en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate',
-            'Referer': f'{base_domain}/',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
-        }
-        
-        # Make request
-        result = await request_handler.request(url, method="GET", headers=headers)
+        # Make request with or without browser
+        result = await request_handler.request(url, method="GET", use_browser=use_browser)
         
         if not result.success:
-            logger.debug(f"Failed to scrape Google page: {result.error}")
+            logger.warning(f"Failed to scrape Google page: {result.error} (strategy: {result.strategy})")
             return []
         
         if not result.html or len(result.html) < 1000:
-            logger.debug(f"Google returned insufficient content: {len(result.html) if result.html else 0} bytes")
+            logger.warning(f"Google returned insufficient content: {len(result.html) if result.html else 0} bytes (strategy: {result.strategy})")
             return []
+        
+        logger.info(f"Successfully scraped Google page with strategy: {result.strategy}, content size: {len(result.html)} bytes")
         
         # Parse based on search type
         if search_type == "all":
-            return self._parse_web_results(result.html)
+            return self._parse_all_results(result.html)
         elif search_type == "news":
             return self._parse_news_results(result.html)
         elif search_type == "images":
@@ -411,148 +322,96 @@ class GoogleScraper:
         
         return []
     
-    def _parse_web_results(self, html: str) -> List[Dict[str, Any]]:
-        """Parse web search results with multiple selector fallbacks"""
+    def _parse_all_results(self, html: str) -> List[Dict[str, Any]]:
+        """Parse standard search results with multiple selector fallbacks"""
         soup = BeautifulSoup(html, 'lxml')
         results = []
         
-        # Try each selector until we find results
-        result_elements = []
-        for selector in self.result_selectors:
-            result_elements = soup.select(selector)
-            # Filter to only meaningful results
-            result_elements = [
-                el for el in result_elements 
-                if el.select_one('h3') or el.select_one('a[href^="http"]')
-            ]
-            if len(result_elements) >= 3:
+        # Try multiple selectors (Google frequently changes their HTML)
+        selectors = [
+            'div.g',  # Classic selector
+            'div[data-sokoban-container]',  # Modern selector
+            'div.tF2Cxc',  # Alternative selector
+            'div.Gx5Zad',  # Another alternative
+            'div.yuRUbf',  # Parent of link
+        ]
+        
+        result_divs = []
+        for selector in selectors:
+            result_divs = soup.select(selector)
+            if result_divs and len(result_divs) > 2:  # Need at least a few results
+                logger.debug(f"Found {len(result_divs)} results with selector: {selector}")
                 break
         
-        if not result_elements:
-            # Fallback: find all links that look like results
-            logger.debug("Using fallback link extraction")
-            return self._parse_fallback(soup)
+        if not result_divs:
+            logger.warning("No result divs found with any selector")
+            # Try to find any links that look like results
+            result_divs = soup.find_all('div', recursive=True)
         
-        for elem in result_elements:
+        for div in result_divs:
             try:
-                result = self._extract_result(elem)
-                if result:
-                    results.append(result)
+                # Extract title - try multiple methods
+                title_elem = (
+                    div.select_one('h3') or 
+                    div.select_one('div[role="heading"]') or
+                    div.find('h3')
+                )
+                title = clean_text(title_elem.get_text()) if title_elem else ""
+                
+                # Extract URL - try multiple methods
+                link_elem = div.select_one('a') or div.find('a')
+                url = ""
+                if link_elem:
+                    url = link_elem.get('href', '')
+                    
+                    # Clean URL (remove Google redirect)
+                    if url.startswith('/url?'):
+                        import re
+                        url_match = re.search(r'[?&]url=([^&]+)', url)
+                        if url_match:
+                            from urllib.parse import unquote
+                            url = unquote(url_match.group(1))
+                    elif url.startswith('/search') or url.startswith('#'):
+                        # Skip internal Google links
+                        continue
+                
+                # Extract snippet - try multiple methods
+                snippet_elem = (
+                    div.select_one('div.VwiC3b') or 
+                    div.select_one('span.aCOpRe') or 
+                    div.select_one('div[data-sncf]') or
+                    div.select_one('div.s') or
+                    div.select_one('span.st')
+                )
+                snippet = clean_text(snippet_elem.get_text()) if snippet_elem else ""
+                
+                # Extract displayed URL
+                cite_elem = div.select_one('cite') or div.find('cite')
+                displayed_url = clean_text(cite_elem.get_text()) if cite_elem else url
+                
+                # Only add if we have at least a title and URL
+                if title and url and url.startswith('http'):
+                    results.append({
+                        'title': title,
+                        'url': url,
+                        'snippet': snippet,
+                        'displayed_url': displayed_url
+                    })
+                    
             except Exception as e:
                 logger.debug(f"Error parsing result: {e}")
                 continue
         
+        logger.info(f"Parsed {len(results)} results from HTML")
         return results
-    
-    def _extract_result(self, elem) -> Optional[Dict[str, Any]]:
-        """Extract a single search result from an element"""
-        # Find title
-        title = ""
-        for selector in self.title_selectors:
-            title_elem = elem.select_one(selector)
-            if title_elem:
-                title = clean_text(title_elem.get_text())
-                break
-        
-        # Find URL
-        url = ""
-        for selector in self.link_selectors:
-            link_elem = elem.select_one(selector)
-            if link_elem:
-                url = link_elem.get('href', '')
-                if url and url.startswith('http'):
-                    # Clean Google redirect URLs
-                    url = self._clean_url(url)
-                    break
-        
-        if not url or not url.startswith('http'):
-            return None
-        
-        # Skip Google internal links
-        if 'google.com' in url or 'webcache.googleusercontent' in url:
-            return None
-        
-        # Find snippet
-        snippet = ""
-        for selector in self.snippet_selectors:
-            snippet_elem = elem.select_one(selector)
-            if snippet_elem:
-                snippet = clean_text(snippet_elem.get_text())
-                if len(snippet) > 20:  # Only use meaningful snippets
-                    break
-        
-        # Find displayed URL
-        cite_elem = elem.select_one('cite') or elem.select_one('.TbwUpd')
-        displayed_url = clean_text(cite_elem.get_text()) if cite_elem else url
-        
-        if title or url:
-            return {
-                'title': title,
-                'url': url,
-                'snippet': snippet,
-                'displayed_url': displayed_url
-            }
-        
-        return None
-    
-    def _parse_fallback(self, soup) -> List[Dict[str, Any]]:
-        """Fallback parsing when standard selectors fail"""
-        results = []
-        
-        # Find all external links with meaningful text
-        for link in soup.find_all('a', href=True):
-            href = link.get('href', '')
-            
-            # Skip non-result links
-            if not href.startswith('http'):
-                continue
-            if 'google.com' in href:
-                continue
-            if 'webcache' in href:
-                continue
-            
-            # Clean URL
-            url = self._clean_url(href)
-            
-            # Get title
-            title = ""
-            h3 = link.find('h3')
-            if h3:
-                title = clean_text(h3.get_text())
-            else:
-                title = clean_text(link.get_text())
-            
-            if title and url and len(title) > 10:
-                results.append({
-                    'title': title,
-                    'url': url,
-                    'snippet': '',
-                    'displayed_url': url
-                })
-        
-        return results[:20]  # Limit fallback results
-    
-    def _clean_url(self, url: str) -> str:
-        """Clean and extract real URL from Google redirect"""
-        if '/url?' in url:
-            match = re.search(r'[?&](?:url|q)=([^&]+)', url)
-            if match:
-                return unquote(match.group(1))
-        return url
     
     def _parse_news_results(self, html: str) -> List[Dict[str, Any]]:
         """Parse news search results"""
         soup = BeautifulSoup(html, 'lxml')
         results = []
         
-        # News result selectors
-        selectors = [
-            'div.SoaBEf',
-            'article',
-            'div.WlydOe',
-            'div.dbsr',
-            'div.g',
-        ]
+        # News results have different structure - try multiple selectors
+        selectors = ['div.SoaBEf', 'div.dbsr', 'article', 'div.Gx5Zad']
         
         articles = []
         for selector in selectors:
@@ -560,45 +419,40 @@ class GoogleScraper:
             if articles:
                 break
         
-        for article in articles[:30]:
+        for article in articles:
             try:
                 # Title and URL
-                link = article.select_one('a[href^="http"]') or article.select_one('a')
-                if not link:
-                    continue
+                link = article.select_one('a') or article.find('a')
+                title = clean_text(link.get_text()) if link else ""
+                url = link.get('href', '') if link else ""
                 
-                url = self._clean_url(link.get('href', ''))
-                if not url or 'google.com' in url:
-                    continue
+                # Clean URL
+                if url.startswith('/url?'):
+                    import re
+                    from urllib.parse import unquote
+                    url_match = re.search(r'[?&]url=([^&]+)', url)
+                    if url_match:
+                        url = unquote(url_match.group(1))
                 
-                # Title
-                title_elem = link.select_one('div[role="heading"]') or link.find('h3') or link
-                title = clean_text(title_elem.get_text())
-                
-                # Source
-                source_elem = article.select_one('.NUnG9d') or article.select_one('.CEMjEf')
+                # Source and date
+                source_elem = article.select_one('div.CEMjEf span') or article.select_one('span.NUnG9d')
                 source = clean_text(source_elem.get_text()) if source_elem else ""
                 
                 # Snippet
-                snippet_elem = article.select_one('.GI74Re') or article.select_one('.Y3v8qd')
+                snippet_elem = article.select_one('div.GI74Re') or article.select_one('div.Y3v8qd')
                 snippet = clean_text(snippet_elem.get_text()) if snippet_elem else ""
                 
-                # Time
-                time_elem = article.select_one('.ZE0LJd') or article.select_one('.WW6dff')
-                time_text = clean_text(time_elem.get_text()) if time_elem else ""
-                
-                if title and url.startswith('http'):
+                if title and url and url.startswith('http'):
                     results.append({
                         'title': title,
                         'url': url,
                         'snippet': snippet,
                         'source': source,
-                        'time': time_text,
                         'type': 'news'
                     })
                     
             except Exception as e:
-                logger.debug(f"Error parsing news: {e}")
+                logger.debug(f"Error parsing news result: {e}")
                 continue
         
         return results
@@ -608,31 +462,27 @@ class GoogleScraper:
         soup = BeautifulSoup(html, 'lxml')
         results = []
         
-        # Image results are complex, try multiple methods
-        for img in soup.select('img[src^="http"]')[:50]:
+        # Image results are in JavaScript/JSON
+        # Try to find image data
+        for img in soup.select('img')[:50]:  # Limit to first 50
             try:
-                src = img.get('src', '')
+                src = img.get('src') or img.get('data-src')
                 alt = img.get('alt', '')
                 
-                # Skip logos and icons
-                if 'logo' in src.lower() or src.startswith('data:'):
-                    continue
-                
-                # Get parent link
-                parent_link = img.find_parent('a')
-                page_url = ""
-                if parent_link:
-                    page_url = self._clean_url(parent_link.get('href', ''))
-                
-                results.append({
-                    'type': 'image',
-                    'image_url': src,
-                    'alt': alt,
-                    'page_url': page_url
-                })
-                
+                if src and not src.startswith('data:') and 'logo' not in src.lower():
+                    # Get parent link if available
+                    parent_link = img.find_parent('a')
+                    page_url = parent_link.get('href', '') if parent_link else ""
+                    
+                    results.append({
+                        'type': 'image',
+                        'image_url': src,
+                        'alt': alt,
+                        'page_url': page_url
+                    })
+                    
             except Exception as e:
-                logger.debug(f"Error parsing image: {e}")
+                logger.debug(f"Error parsing image result: {e}")
                 continue
         
         return results
@@ -642,47 +492,44 @@ class GoogleScraper:
         soup = BeautifulSoup(html, 'lxml')
         results = []
         
-        # Video result containers
-        for container in soup.select('div.g, div[data-hveid]')[:30]:
+        # Video results similar to standard results
+        for div in soup.select('div.g'):
             try:
-                # Check for video indicators
-                if not container.select_one('span[class*="video"], div[class*="video"], .J1mWY'):
-                    continue
-                
                 # Title
-                title_elem = container.select_one('h3')
+                title_elem = div.select_one('h3')
                 title = clean_text(title_elem.get_text()) if title_elem else ""
                 
                 # URL
-                link = container.select_one('a[href^="http"]')
-                if not link:
-                    continue
-                url = self._clean_url(link.get('href', ''))
+                link_elem = div.select_one('a')
+                url = link_elem.get('href', '') if link_elem else ""
                 
-                # Duration
-                duration_elem = container.select_one('.J1mWY') or container.select_one('.OwKbof')
+                # Clean URL
+                if url.startswith('/url?'):
+                    import re
+                    from urllib.parse import unquote
+                    url_match = re.search(r'[?&]url=([^&]+)', url)
+                    if url_match:
+                        url = unquote(url_match.group(1))
+                
+                # Duration (if available)
+                duration_elem = div.select_one('div.J1mWY')
                 duration = clean_text(duration_elem.get_text()) if duration_elem else ""
                 
                 # Snippet
-                snippet_elem = container.select_one('.VwiC3b')
+                snippet_elem = div.select_one('div.VwiC3b')
                 snippet = clean_text(snippet_elem.get_text()) if snippet_elem else ""
                 
-                # Source (channel)
-                source_elem = container.select_one('.uo4vr') or container.select_one('cite')
-                source = clean_text(source_elem.get_text()) if source_elem else ""
-                
-                if title and url.startswith('http'):
+                if title and url and url.startswith('http'):
                     results.append({
                         'type': 'video',
                         'title': title,
                         'url': url,
-                        'duration': duration,
                         'snippet': snippet,
-                        'source': source
+                        'duration': duration
                     })
                     
             except Exception as e:
-                logger.debug(f"Error parsing video: {e}")
+                logger.debug(f"Error parsing video result: {e}")
                 continue
         
         return results
